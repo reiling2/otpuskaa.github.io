@@ -12,6 +12,7 @@ import {
   const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const PX_PER_DAY = 18;
+  const COLLAPSED_MONTH_WIDTH = 26;
 
   const firebaseConfig = {
     apiKey: "AIzaSyAxIvQmP9dh6pB1EeO9gJvaROlW64DytKc",
@@ -50,7 +51,8 @@ import {
       { id: crypto.randomUUID(), employee: 'Большакова Анна Владимировна', start: '2026-01-07', end: '2026-01-19', color: '#eb4abf', comment: '' },
       { id: crypto.randomUUID(), employee: 'Большакова Анна Владимировна', start: '2026-04-03', end: '2026-04-15', color: '#eb4abf', comment: '' },
       { id: crypto.randomUUID(), employee: 'Сидорова Ольга Викторовна', start: '2026-02-12', end: '2026-03-18', color: '#45ea06', comment: '' }
-    ]
+    ],
+    collapsedMonths: []
   };
 
   const $ = (id) => document.getElementById(id);
@@ -79,7 +81,8 @@ import {
     newEmployeeName: $('newEmployeeName'),
     removeEmployeeModalBackdrop: $('removeEmployeeModalBackdrop'),
     removeEmployeeGroupSelect: $('removeEmployeeGroupSelect'),
-    removeEmployeeSelect: $('removeEmployeeSelect')
+    removeEmployeeSelect: $('removeEmployeeSelect'),
+    expandAllMonthsBtn: $('expandAllMonthsBtn')
   };
 
   let state = deepCopy(DEFAULT_DATA);
@@ -97,7 +100,8 @@ import {
         if (saved && Array.isArray(saved.groups) && Array.isArray(saved.vacations)) {
           state = {
             groups: saved.groups,
-            vacations: saved.vacations
+            vacations: saved.vacations,
+            collapsedMonths: Array.isArray(saved.collapsedMonths) ? saved.collapsedMonths : []
           };
           return;
         }
@@ -116,6 +120,7 @@ import {
       await set(stateRef, {
         groups: state.groups,
         vacations: state.vacations,
+        collapsedMonths: Array.isArray(state.collapsedMonths) ? state.collapsedMonths : [],
         updatedAt: Date.now()
       });
     } catch (error) {
@@ -133,9 +138,11 @@ import {
 
       state = {
         groups: incoming.groups,
-        vacations: incoming.vacations
+        vacations: incoming.vacations,
+        collapsedMonths: Array.isArray(incoming.collapsedMonths) ? incoming.collapsedMonths : []
       };
 
+      createMonthsHeader();
       renderFilters();
       renderBoard();
     });
@@ -143,6 +150,24 @@ import {
 
   function daysInMonth(monthIndex) {
     return new Date(YEAR, monthIndex + 1, 0).getDate();
+  }
+
+  function isMonthCollapsed(monthIndex) {
+    return Array.isArray(state.collapsedMonths) && state.collapsedMonths.includes(monthIndex);
+  }
+
+  function getMonthWidth(monthIndex) {
+    return isMonthCollapsed(monthIndex)
+      ? COLLAPSED_MONTH_WIDTH
+      : daysInMonth(monthIndex) * PX_PER_DAY;
+  }
+
+  function getMonthOffset(monthIndex) {
+    let offset = 0;
+    for (let i = 0; i < monthIndex; i++) {
+      offset += getMonthWidth(i);
+    }
+    return offset;
   }
 
   function getDaysInYear() {
@@ -156,11 +181,42 @@ import {
   }
 
   function offsetForDate(dateStr) {
-    return dayIndex(dateStr) * PX_PER_DAY;
+    const d = new Date(dateStr + 'T00:00:00');
+    const monthIndex = d.getMonth();
+    const day = d.getDate() - 1;
+    const baseOffset = getMonthOffset(monthIndex);
+
+    if (isMonthCollapsed(monthIndex)) {
+      return baseOffset;
+    }
+
+    return baseOffset + day * PX_PER_DAY;
   }
 
   function durationWidth(startStr, endStr) {
-    return Math.max((dayIndex(endStr) - dayIndex(startStr) + 1) * PX_PER_DAY - 2, 8);
+    const start = new Date(startStr + 'T00:00:00');
+    const end = new Date(endStr + 'T00:00:00');
+
+    let width = 0;
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      const monthIndex = cursor.getMonth();
+
+      if (isMonthCollapsed(monthIndex)) {
+        width += COLLAPSED_MONTH_WIDTH;
+
+        const nextMonth = new Date(cursor);
+        nextMonth.setMonth(monthIndex + 1, 1);
+        nextMonth.setHours(0, 0, 0, 0);
+        cursor.setTime(nextMonth.getTime());
+      } else {
+        width += PX_PER_DAY;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    return Math.max(width - 2, 8);
   }
 
   function compactName(full) {
@@ -188,39 +244,89 @@ import {
     return state.groups.flatMap(g => g.employees).sort((a, b) => a.localeCompare(b, 'ru'));
   }
 
+  async function toggleMonth(monthIndex) {
+    if (!Array.isArray(state.collapsedMonths)) {
+      state.collapsedMonths = [];
+    }
+
+    if (state.collapsedMonths.includes(monthIndex)) {
+      state.collapsedMonths = state.collapsedMonths.filter(m => m !== monthIndex);
+    } else {
+      state.collapsedMonths = [...state.collapsedMonths, monthIndex].sort((a, b) => a - b);
+    }
+
+    createMonthsHeader();
+    renderBoard();
+    await saveStateToCloud();
+  }
+
+  async function expandAllMonths() {
+    state.collapsedMonths = [];
+    createMonthsHeader();
+    renderBoard();
+    await saveStateToCloud();
+  }
+
   function createMonthsHeader() {
     els.months.innerHTML = '';
     let totalWidth = 0;
 
     MONTHS.forEach((name, monthIndex) => {
       const days = daysInMonth(monthIndex);
-      const width = days * PX_PER_DAY;
+      const collapsed = isMonthCollapsed(monthIndex);
+      const width = getMonthWidth(monthIndex);
+
       totalWidth += width;
 
       const month = document.createElement('div');
-      month.className = 'month';
+      month.className = `month ${collapsed ? 'collapsed' : ''}`;
       month.style.width = `${width}px`;
       month.style.minWidth = `${width}px`;
-      month.innerHTML = `
-        <div class="month-name">${name}</div>
-        <div class="days" style="grid-template-columns: repeat(${days}, minmax(0, 1fr));">
-          ${Array.from({ length: days }, (_, i) => `<div class="day">${i + 1}</div>`).join('')}
-        </div>
-      `;
+      month.title = collapsed ? `${name} — свернут, нажмите чтобы развернуть` : '';
+
+      if (collapsed) {
+        month.innerHTML = `
+          <button class="month-collapse-pill" type="button" data-month="${monthIndex}" title="Развернуть ${name}" aria-label="Развернуть ${name}">
+            ›
+          </button>
+        `;
+      } else {
+        month.innerHTML = `
+          <div class="month-head">
+            <div class="month-name">${name}</div>
+            <button class="month-toggle-btn" type="button" data-month="${monthIndex}" title="Свернуть ${name}" aria-label="Свернуть ${name}">
+              ×
+            </button>
+          </div>
+          <div class="days" style="grid-template-columns: repeat(${days}, minmax(0, 1fr));">
+            ${Array.from({ length: days }, (_, i) => `<div class="day">${i + 1}</div>`).join('')}
+          </div>
+        `;
+      }
+
       els.months.appendChild(month);
     });
 
     els.board.style.minWidth = `calc(var(--left-w) + ${totalWidth}px)`;
     els.timelineCol.style.width = `${totalWidth}px`;
     els.timelineCol.style.minWidth = `${totalWidth}px`;
+
     renderMonthSeparators();
+
+    els.months.querySelectorAll('.month-toggle-btn, .month-collapse-pill').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const monthIndex = Number(btn.dataset.month);
+        await toggleMonth(monthIndex);
+      });
+    });
   }
 
   function renderMonthSeparators() {
     els.timelineGrid.innerHTML = '';
     let offset = 0;
+
     for (let i = 0; i < MONTHS.length - 1; i++) {
-      offset += daysInMonth(i) * PX_PER_DAY;
+      offset += getMonthWidth(i);
       const line = document.createElement('div');
       line.className = 'month-separator';
       line.style.left = `${offset}px`;
@@ -568,6 +674,10 @@ import {
   els.groupFilter.onchange = renderBoard;
   els.searchInput.oninput = renderBoard;
 
+  if (els.expandAllMonthsBtn) {
+    els.expandAllMonthsBtn.onclick = expandAllMonths;
+  }
+
   els.modalBackdrop.addEventListener('click', e => { if (e.target === els.modalBackdrop) closeVacationModal(); });
   els.employeeModalBackdrop.addEventListener('click', e => { if (e.target === els.employeeModalBackdrop) closeEmployeeModal(); });
   els.removeEmployeeModalBackdrop.addEventListener('click', e => { if (e.target === els.removeEmployeeModalBackdrop) closeRemoveEmployeeModal(); });
@@ -581,8 +691,8 @@ import {
   });
 
   async function init() {
-    createMonthsHeader();
     await loadStateFromCloud();
+    createMonthsHeader();
     renderFilters();
     renderBoard();
     subscribeToCloudUpdates();
