@@ -11,8 +11,9 @@
     <div class="toolbar">
       <div class="title">График отпусков 2026</div>
 
-      <input id="searchInput" type="text" placeholder="Поиск по сотруднику">
-      <select id="groupFilter"><option value="all">Все отделы</option></select>
+      <input id="searchInput" type="search" placeholder="Поиск по сотруднику" autocomplete="off" autocorrect="off" spellcheck="false">
+      <select id="branchFilter"></select>
+      <select id="groupFilter"></select>
       <button id="expandAllMonthsBtn" type="button">Развернуть все месяцы</button>
 
       <button id="addBtn" type="button" hidden>Добавить отпуск</button>
@@ -29,7 +30,9 @@
 
     <div class="board-wrap" id="boardWrap">
       <div class="board" id="board">
-        <div class="left-panel"><div class="left-top"></div></div>
+        <div class="left-panel">
+          <div class="left-top" id="branchBadge">Филиал Северо-запад</div>
+        </div>
         <div class="timeline-header"><div class="months" id="months"></div></div>
         <div class="groups-area">
           <div class="names-col" id="namesCol"></div>
@@ -61,7 +64,6 @@
             <label for="startDate">Дата начала</label>
             <input id="startDate" type="date">
           </div>
-
           <div class="field">
             <label for="endDate">Дата окончания</label>
             <input id="endDate" type="date">
@@ -73,7 +75,6 @@
             <label for="vacationColor">Цвет полоски</label>
             <input id="vacationColor" type="color" value="#2d63dd">
           </div>
-
           <div class="field">
             <label for="vacationStatus">Статус</label>
             <select id="vacationStatus">
@@ -107,7 +108,7 @@
       <div class="modal-body">
         <div class="field">
           <label for="employeeDepartmentSearch">Поиск отдела</label>
-          <input id="employeeDepartmentSearch" type="text" placeholder="Начните вводить название отдела">
+          <input id="employeeDepartmentSearch" type="text" placeholder="Начните вводить название отдела" autocomplete="off">
         </div>
 
         <div class="field">
@@ -164,21 +165,15 @@
       <div class="modal-body">
         <div class="field">
           <label for="authEmail">Email</label>
-          <input id="authEmail" type="email" placeholder="manager@company.ru">
+          <input id="authEmail" type="email" placeholder="manager@company.ru" autocomplete="username">
         </div>
-
         <div class="field">
           <label for="authPassword">Пароль</label>
-          <input id="authPassword" type="password" placeholder="Минимум 6 символов">
+          <input id="authPassword" type="password" placeholder="Минимум 6 символов" autocomplete="current-password">
         </div>
-
         <div id="authError" class="form-error"></div>
-
-        <div class="auth-help">
-          Первый созданный аккаунт автоматически становится администратором. Остальным доступы выдает администратор по email.
-        </div>
+        <div class="auth-help">Первый зарегистрированный аккаунт становится администратором. Остальным доступы выдает администратор по email.</div>
       </div>
-
       <div class="modal-footer stacked-mobile">
         <button id="closeAuthModalBtn" type="button">Отмена</button>
         <div class="actions-right wide-on-mobile">
@@ -213,8 +208,9 @@
       <div class="modal-header">Управление отделами</div>
       <div class="modal-body admin-modal-body">
         <section class="admin-section">
-          <div class="section-title">Создать отдел вручную</div>
-          <div class="inline-form">
+          <div class="section-title">Создать отдел в выбранном филиале</div>
+          <div class="inline-form two-cols-inline">
+            <select id="adminDepartmentBranchSelect"></select>
             <input id="adminDepartmentName" type="text" placeholder="Название нового отдела">
             <button id="addDepartmentDirectBtn" type="button">Создать</button>
           </div>
@@ -222,7 +218,7 @@
         </section>
 
         <section class="admin-section">
-          <div class="section-title">Существующие отделы</div>
+          <div class="section-title">Отделы</div>
           <div id="departmentList" class="admin-list"></div>
         </section>
 
@@ -239,31 +235,31 @@
 
   <div class="modal-backdrop" id="accessAdminModalBackdrop">
     <div class="modal modal-xl">
-      <div class="modal-header">Доступы руководителей</div>
+      <div class="modal-header">Управление доступами</div>
       <div class="modal-body admin-modal-body">
         <section class="admin-section">
-          <div class="section-title">Выдать доступ по email</div>
+          <div class="section-title">Выдать доступ руководителю</div>
           <div class="field">
-            <label for="accessInviteEmail">Email сотрудника</label>
+            <label for="accessInviteEmail">Email</label>
             <input id="accessInviteEmail" type="email" placeholder="manager@company.ru">
           </div>
           <div class="field">
-            <label>Отделы, которыми можно управлять</label>
-            <div id="accessInviteDepartments" class="checkbox-grid"></div>
-          </div>
-          <div class="inline-form actions-start">
-            <button id="accessInviteSaveBtn" type="button">Сохранить доступ</button>
+            <label>Отделы</label>
+            <div id="accessInviteDepartments" class="checkbox-list"></div>
           </div>
           <div id="accessInviteError" class="form-error"></div>
+          <div class="actions-right align-start">
+            <button id="accessInviteSaveBtn" type="button">Сохранить приглашение</button>
+          </div>
         </section>
 
         <section class="admin-section">
-          <div class="section-title">Активные приглашения</div>
+          <div class="section-title">Приглашения</div>
           <div id="accessInviteList" class="admin-list"></div>
         </section>
 
         <section class="admin-section">
-          <div class="section-title">Уже назначенные роли</div>
+          <div class="section-title">Выданные роли</div>
           <div id="accessRoleList" class="admin-list"></div>
         </section>
       </div>

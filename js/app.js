@@ -18,12 +18,30 @@ import {
 
 (() => {
   const YEAR = 2026;
-  const APP_VERSION = 2;
+  const APP_VERSION = 3;
   const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const PX_PER_DAY = 18;
   const COLLAPSED_MONTH_WIDTH = 26;
   const COLLAPSED_MONTHS_STORAGE_KEY = `vacation_schedule_collapsed_months_${YEAR}`;
+  const NORTHWEST_BRANCH_ID = 'branch_northwest';
+  const CENTER_BRANCH_ID = 'branch_center';
+
+  const DEFAULT_BRANCHS = [
+    { id: NORTHWEST_BRANCH_ID, name: 'Филиал Северо-запад', order: 1, status: 'active' },
+    { id: CENTER_BRANCH_ID, name: 'ГСП-Центр', order: 2, status: 'active' }
+  ];
+
+  const CENTER_BRANCH_SEED_DEPARTMENTS = [
+    'Производственно-технический отдел',
+    'Отдел снабжения',
+    'Юридический отдел'
+  ];
+
+  const LEGACY_DEFAULT_DATA = {
+    groups: [],
+    vacations: []
+  };
 
   const firebaseConfig = {
     apiKey: "AIzaSyAxIvQmP9dh6pB1EeO9gJvaROlW64DytKc",
@@ -44,15 +62,11 @@ import {
   const rolesRootRef = ref(db, 'roles');
   const invitesRootRef = ref(db, 'roleInvites');
 
-  const LEGACY_DEFAULT_DATA = {
-    groups: [],
-    vacations: []
-  };
-
   const $ = (id) => document.getElementById(id);
 
   const els = {
     board: $('board'),
+    branchBadge: $('branchBadge'),
     months: $('months'),
     namesCol: $('namesCol'),
     timelineCol: $('timelineCol'),
@@ -60,6 +74,7 @@ import {
     timelineGroups: $('timelineGroups'),
     tooltip: $('tooltip'),
     status: $('statusBox'),
+    branchFilter: $('branchFilter'),
     groupFilter: $('groupFilter'),
     searchInput: $('searchInput'),
     expandAllMonthsBtn: $('expandAllMonthsBtn'),
@@ -117,6 +132,7 @@ import {
     saveDepartmentRequestBtn: $('saveDepartmentRequestBtn'),
 
     departmentAdminModalBackdrop: $('departmentAdminModalBackdrop'),
+    adminDepartmentBranchSelect: $('adminDepartmentBranchSelect'),
     adminDepartmentName: $('adminDepartmentName'),
     adminDepartmentError: $('adminDepartmentError'),
     departmentList: $('departmentList'),
@@ -140,8 +156,8 @@ import {
   let currentRoleRecord = null;
   let currentRole = 'viewer';
   let currentDepartmentIds = new Set();
-  let initialSource = 'empty';
   let adminAccessSnapshot = { roles: {}, roleInvites: {} };
+  let initialLoadDone = false;
 
   function buildEmptyState() {
     return {
@@ -151,6 +167,7 @@ import {
         createdAt: Date.now(),
         updatedAt: Date.now()
       },
+      branches: {},
       departments: {},
       employees: {},
       vacations: {},
@@ -165,7 +182,7 @@ import {
       .replace(/ё/g, 'е')
       .replace(/[^a-zа-я0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 50) || 'item';
+      .slice(0, 40) || 'item';
   }
 
   function normalizeText(text) {
@@ -185,8 +202,7 @@ import {
   }
 
   function makeId(prefix, seed = '') {
-    const safeSeed = slugify(seed);
-    return `${prefix}_${safeSeed}_${crypto.randomUUID().slice(0, 8)}`;
+    return `${prefix}_${slugify(seed)}_${crypto.randomUUID().slice(0, 8)}`;
   }
 
   function nowTs() {
@@ -206,46 +222,16 @@ import {
       .replaceAll("'", '&#039;');
   }
 
-  function formatDateTime(ts) {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleString('ru-RU');
-  }
-
-  function compactName(full) {
-    const parts = String(full).trim().split(/\s+/);
-    if (parts.length < 3) return full;
-    return `${parts[0]} ${parts[1][0]}.${parts[2][0]}.`;
-  }
-
   function roleLabel(role) {
     if (role === 'admin') return 'Администратор';
     if (role === 'manager') return 'Руководитель';
     return 'Гость';
   }
 
-  function statusLabel(status) {
-    return {
-      approved: 'Согласован',
-      pending: 'На согласовании',
-      rejected: 'Отклонен',
-      cancelled: 'Отменен'
-    }[status] || 'Согласован';
-  }
-
-  function requestStatusLabel(status) {
-    return {
-      pending: 'Ожидает решения',
-      approved: 'Создан отдел',
-      linked: 'Привязан к отделу',
-      rejected: 'Отклонен'
-    }[status] || 'Ожидает решения';
-  }
-
   function loadCollapsedMonths() {
     try {
       const raw = localStorage.getItem(COLLAPSED_MONTHS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
+      const parsed = raw ? JSON.parse(raw) : [];
       return Array.isArray(parsed) ? parsed.filter(Number.isInteger) : [];
     } catch {
       return [];
@@ -253,7 +239,203 @@ import {
   }
 
   function saveCollapsedMonths() {
-    localStorage.setItem(COLLAPSED_MONTHS_STORAGE_KEY, JSON.stringify(collapsedMonths));
+    try {
+      localStorage.setItem(COLLAPSED_MONTHS_STORAGE_KEY, JSON.stringify(collapsedMonths));
+    } catch {}
+  }
+
+  function ensureSeedStructure(target) {
+    target.meta = {
+      year: YEAR,
+      version: APP_VERSION,
+      createdAt: target.meta?.createdAt || nowTs(),
+      updatedAt: nowTs()
+    };
+
+    target.branches = target.branches || {};
+    target.departments = target.departments || {};
+    target.employees = target.employees || {};
+    target.vacations = target.vacations || {};
+    target.departmentRequests = target.departmentRequests || {};
+
+    DEFAULT_BRANCHS.forEach(branch => {
+      if (!target.branches[branch.id]) {
+        target.branches[branch.id] = {
+          ...branch,
+          createdAt: nowTs()
+        };
+      }
+    });
+
+    CENTER_BRANCH_SEED_DEPARTMENTS.forEach((name, index) => {
+      const existing = Object.values(target.departments).find(dep => dep && dep.branchId === CENTER_BRANCH_ID && normalizeText(dep.name) === normalizeText(name));
+      if (!existing) {
+        const id = `dep_center_${slugify(name)}`;
+        target.departments[id] = {
+          id,
+          name,
+          branchId: CENTER_BRANCH_ID,
+          status: 'active',
+          order: index + 1,
+          createdAt: nowTs()
+        };
+      }
+    });
+
+    return target;
+  }
+
+  function normalizeSchedulePayload(payload) {
+    const next = buildEmptyState();
+    if (!payload || typeof payload !== 'object') {
+      return ensureSeedStructure(next);
+    }
+
+    next.meta = deepCopy(payload.meta || next.meta);
+    next.branches = deepCopy(payload.branches || {});
+    next.departments = deepCopy(payload.departments || {});
+    next.employees = deepCopy(payload.employees || {});
+    next.vacations = deepCopy(payload.vacations || {});
+    next.departmentRequests = deepCopy(payload.departmentRequests || {});
+
+    Object.entries(next.branches).forEach(([id, branch]) => {
+      if (!branch) delete next.branches[id];
+      else next.branches[id] = { id, status: 'active', order: 999, ...branch };
+    });
+
+    Object.entries(next.departments).forEach(([id, dep]) => {
+      if (!dep) delete next.departments[id];
+      else next.departments[id] = { id, status: 'active', ...dep };
+    });
+
+    Object.entries(next.employees).forEach(([id, emp]) => {
+      if (!emp) delete next.employees[id];
+      else next.employees[id] = { id, isActive: true, ...emp };
+    });
+
+    Object.entries(next.vacations).forEach(([id, vac]) => {
+      if (!vac) delete next.vacations[id];
+      else next.vacations[id] = { id, status: 'approved', color: '#2d63dd', ...vac };
+    });
+
+    Object.entries(next.departmentRequests).forEach(([id, req]) => {
+      if (!req) delete next.departmentRequests[id];
+      else next.departmentRequests[id] = { id, status: 'pending', ...req };
+    });
+
+    return ensureSeedStructure(next);
+  }
+
+
+  function hasRealScheduleContent(scheduleState) {
+    const employeeCount = Object.keys(scheduleState?.employees || {}).length;
+    const vacationCount = Object.keys(scheduleState?.vacations || {}).length;
+    const northwestDepartments = Object.values(scheduleState?.departments || {})
+      .filter(Boolean)
+      .filter(dep => dep.branchId === NORTHWEST_BRANCH_ID && dep.status !== 'archived').length;
+    return employeeCount > 0 || vacationCount > 0 || northwestDepartments > 0;
+  }
+
+  function migrateLegacyState(legacyState) {
+    const next = ensureSeedStructure(buildEmptyState());
+    const data = legacyState && Array.isArray(legacyState.groups) ? legacyState : LEGACY_DEFAULT_DATA;
+    const employeeMap = new Map();
+
+    (data.groups || []).forEach((group, groupIndex) => {
+      const departmentId = makeId('dep', group.name || `Отдел-${groupIndex + 1}`);
+      next.departments[departmentId] = {
+        id: departmentId,
+        name: group.name || `Отдел ${groupIndex + 1}`,
+        branchId: NORTHWEST_BRANCH_ID,
+        status: 'active',
+        order: groupIndex + 1,
+        createdAt: nowTs()
+      };
+
+      (group.employees || []).forEach((fullName, employeeIndex) => {
+        const employeeId = makeId('emp', `${group.name || 'dep'}-${fullName || employeeIndex}`);
+        next.employees[employeeId] = {
+          id: employeeId,
+          displayName: fullName,
+          departmentId,
+          isActive: true,
+          createdAt: nowTs()
+        };
+        if (!employeeMap.has(fullName)) {
+          employeeMap.set(fullName, employeeId);
+        }
+      });
+    });
+
+    (data.vacations || []).forEach((vacation, index) => {
+      const employeeId = employeeMap.get(vacation.employee);
+      if (!employeeId) return;
+      const employee = next.employees[employeeId];
+      const vacationId = vacation.id || makeId('vac', `${vacation.employee}-${index}`);
+      next.vacations[vacationId] = {
+        id: vacationId,
+        employeeId,
+        departmentId: employee.departmentId,
+        start: vacation.start,
+        end: vacation.end,
+        color: vacation.color || '#2d63dd',
+        status: vacation.status || 'approved',
+        comment: vacation.comment || '',
+        createdAt: nowTs(),
+        updatedAt: nowTs()
+      };
+    });
+
+    return ensureSeedStructure(next);
+  }
+
+  function getBranches() {
+    return Object.values(state.branches || {})
+      .filter(Boolean)
+      .filter(branch => branch.status !== 'archived')
+      .sort((a, b) => (a.order || 999) - (b.order || 999) || a.name.localeCompare(b.name, 'ru'));
+  }
+
+  function getCurrentBranchId() {
+    const branches = getBranches();
+    const current = els.branchFilter.value;
+    const availableIds = branches.map(branch => branch.id);
+    if (availableIds.includes(current)) return current;
+    return branches[0]?.id || NORTHWEST_BRANCH_ID;
+  }
+
+  function getCurrentBranchName() {
+    const branchId = getCurrentBranchId();
+    return state.branches?.[branchId]?.name || 'Филиал';
+  }
+
+  function getActiveDepartments(branchId = getCurrentBranchId()) {
+    return Object.values(state.departments || {})
+      .filter(Boolean)
+      .filter(dep => dep.status !== 'archived')
+      .filter(dep => dep.branchId === branchId)
+      .sort((a, b) => (a.order || 999) - (b.order || 999) || a.name.localeCompare(b.name, 'ru'));
+  }
+
+  function getDepartmentName(departmentId) {
+    return state.departments?.[departmentId]?.name || 'Без отдела';
+  }
+
+  function getEmployees({ branchId = null, departmentId = null, manageableOnly = false } = {}) {
+    return Object.values(state.employees || {})
+      .filter(Boolean)
+      .filter(emp => emp.isActive !== false)
+      .filter(emp => !departmentId || emp.departmentId === departmentId)
+      .filter(emp => !branchId || state.departments?.[emp.departmentId]?.branchId === branchId)
+      .filter(emp => !manageableOnly || canManageDepartment(emp.departmentId))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ru'));
+  }
+
+  function getVacationsForEmployee(employeeId) {
+    return Object.values(state.vacations || {})
+      .filter(Boolean)
+      .filter(vac => vac.employeeId === employeeId)
+      .sort((a, b) => a.start.localeCompare(b.start));
   }
 
   function isAdmin() {
@@ -262,6 +444,11 @@ import {
 
   function isManager() {
     return currentRole === 'manager';
+  }
+
+  function canManageDepartment(departmentId) {
+    if (isAdmin()) return true;
+    return isManager() && currentDepartmentIds.has(departmentId);
   }
 
   function canEditAnything() {
@@ -280,217 +467,185 @@ import {
     return isAdmin();
   }
 
-  function canManageDepartment(departmentId) {
-    if (!departmentId) return false;
-    if (isAdmin()) return true;
-    if (!isManager()) return false;
-    return currentDepartmentIds.has(departmentId);
-  }
-
-  function getDepartmentName(departmentId) {
-    return state.departments?.[departmentId]?.name || 'Без отдела';
-  }
-
-  function getActiveDepartments() {
-    return Object.values(state.departments || {})
-      .filter(dep => dep && dep.status !== 'archived')
-      .sort((a, b) => {
-        const orderDiff = (a.sortOrder || 0) - (b.sortOrder || 0);
-        if (orderDiff !== 0) return orderDiff;
-        return String(a.name).localeCompare(String(b.name), 'ru');
-      });
-  }
-
-  function getAllDepartments() {
-    return Object.values(state.departments || {})
-      .filter(Boolean)
-      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru'));
-  }
-
-  function getEmployees({ activeOnly = true, departmentId = null, manageableOnly = false } = {}) {
-    return Object.values(state.employees || {})
-      .filter(Boolean)
-      .filter(emp => !activeOnly || emp.isActive !== false)
-      .filter(emp => !departmentId || emp.departmentId === departmentId)
-      .filter(emp => !manageableOnly || canManageDepartment(emp.departmentId))
-      .filter(emp => state.departments?.[emp.departmentId] && state.departments[emp.departmentId].status !== 'archived')
-      .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName), 'ru'));
-  }
-
-  function getEmployeeById(employeeId) {
-    return state.employees?.[employeeId] || null;
-  }
-
-  function getVacationsForEmployee(employeeId) {
-    return Object.values(state.vacations || {})
-      .filter(Boolean)
-      .filter(vac => vac.employeeId === employeeId)
-      .sort((a, b) => a.start.localeCompare(b.start));
-  }
-
-  function getDepartmentRequests() {
-    return Object.values(state.departmentRequests || {})
-      .filter(Boolean)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }
-
   function canManageVacation(vacation) {
+    if (!vacation) return false;
     return canManageDepartment(vacation.departmentId);
   }
 
-  function buildStateFromLegacy(legacy) {
-    const nextState = buildEmptyState();
-    const departmentIdByName = new Map();
-    const employeeIdByComposite = new Map();
-
-    (legacy.groups || []).forEach((group, index) => {
-      const departmentId = makeId('dep', group.name);
-      departmentIdByName.set(group.name, departmentId);
-      nextState.departments[departmentId] = {
-        id: departmentId,
-        name: group.name,
-        status: 'active',
-        sortOrder: index + 1,
-        createdAt: nowTs(),
-        updatedAt: nowTs(),
-        createdBy: 'system',
-        updatedBy: 'system'
-      };
-
-      (group.employees || []).forEach((employeeName) => {
-        const employeeId = makeId('emp', `${group.name}-${employeeName}`);
-        employeeIdByComposite.set(`${group.name}||${employeeName}`, employeeId);
-        nextState.employees[employeeId] = {
-          id: employeeId,
-          displayName: employeeName,
-          departmentId,
-          isActive: true,
-          createdAt: nowTs(),
-          updatedAt: nowTs(),
-          createdBy: 'system',
-          updatedBy: 'system'
-        };
-      });
-    });
-
-    (legacy.vacations || []).forEach((vacation) => {
-      const matchingGroup = (legacy.groups || []).find(group => (group.employees || []).includes(vacation.employee));
-      if (!matchingGroup) return;
-
-      const departmentId = departmentIdByName.get(matchingGroup.name);
-      const employeeId = employeeIdByComposite.get(`${matchingGroup.name}||${vacation.employee}`);
-      if (!departmentId || !employeeId) return;
-
-      const vacationId = vacation.id || makeId('vac', `${vacation.employee}-${vacation.start}`);
-      nextState.vacations[vacationId] = {
-        id: vacationId,
-        employeeId,
-        departmentId,
-        start: vacation.start,
-        end: vacation.end,
-        color: vacation.color || '#2d63dd',
-        comment: vacation.comment || '',
-        status: vacation.status || 'approved',
-        createdAt: nowTs(),
-        updatedAt: nowTs(),
-        createdBy: 'system',
-        updatedBy: 'system'
-      };
-    });
-
-    nextState.meta.createdAt = nowTs();
-    nextState.meta.updatedAt = nowTs();
-    return nextState;
+  function canManageEmployee(employee) {
+    if (!employee) return false;
+    return canManageDepartment(employee.departmentId);
   }
 
-  function normalizeSchedulePayload(payload) {
-    const base = buildEmptyState();
-    return {
-      meta: {
-        ...base.meta,
-        ...(payload?.meta || {})
-      },
-      departments: payload?.departments || {},
-      employees: payload?.employees || {},
-      vacations: payload?.vacations || {},
-      departmentRequests: payload?.departmentRequests || {}
-    };
+  function getDaysInYear() {
+    return 365;
+  }
+
+  function daysInMonth(monthIndex) {
+    return new Date(YEAR, monthIndex + 1, 0).getDate();
+  }
+
+  function isMonthCollapsed(monthIndex) {
+    return collapsedMonths.includes(monthIndex);
+  }
+
+  function getMonthWidth(monthIndex) {
+    return isMonthCollapsed(monthIndex) ? COLLAPSED_MONTH_WIDTH : daysInMonth(monthIndex) * PX_PER_DAY;
+  }
+
+  function getMonthOffset(monthIndex) {
+    let offset = 0;
+    for (let i = 0; i < monthIndex; i++) {
+      offset += getMonthWidth(i);
+    }
+    return offset;
+  }
+
+  function dayIndex(dateStr) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    const start = new Date(`${YEAR}-01-01T00:00:00`);
+    return Math.floor((d - start) / 86400000);
+  }
+
+  function offsetForDayNumber(dayNumber) {
+    const day = Math.min(Math.max(dayNumber, 0), getDaysInYear());
+    if (day === getDaysInYear()) {
+      return MONTHS.reduce((sum, _, monthIndex) => sum + getMonthWidth(monthIndex), 0);
+    }
+
+    const date = new Date(`${YEAR}-01-01T00:00:00`);
+    date.setDate(date.getDate() + day);
+    return offsetForDate(date.toISOString().slice(0, 10));
+  }
+
+  function offsetForDate(dateStr) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    const monthIndex = d.getMonth();
+    const day = d.getDate() - 1;
+    const baseOffset = getMonthOffset(monthIndex);
+    if (isMonthCollapsed(monthIndex)) return baseOffset;
+    return baseOffset + day * PX_PER_DAY;
+  }
+
+  function durationWidth(startStr, endStr) {
+    const start = new Date(`${startStr}T00:00:00`);
+    const end = new Date(`${endStr}T00:00:00`);
+    let width = 0;
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      const monthIndex = cursor.getMonth();
+      if (isMonthCollapsed(monthIndex)) {
+        width += COLLAPSED_MONTH_WIDTH;
+        const nextMonth = new Date(cursor);
+        nextMonth.setMonth(monthIndex + 1, 1);
+        nextMonth.setHours(0, 0, 0, 0);
+        cursor.setTime(nextMonth.getTime());
+      } else {
+        width += PX_PER_DAY;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    return Math.max(width - 2, 8);
+  }
+
+  function compactName(full) {
+    const parts = String(full).trim().split(/\s+/);
+    if (parts.length < 3) return full;
+    return `${parts[0]} ${parts[1][0]}.${parts[2][0]}.`;
+  }
+
+  function formatTooltip(vacation) {
+    const employee = state.employees?.[vacation.employeeId];
+    const start = new Date(`${vacation.start}T00:00:00`);
+    const end = new Date(`${vacation.end}T00:00:00`);
+    const title = compactName(employee?.displayName || 'Сотрудник');
+    const status = vacation.status && vacation.status !== 'approved' ? ` · ${vacationStatusLabel(vacation.status)}` : '';
+    const comment = vacation.comment ? ` · ${vacation.comment}` : '';
+    return `${title} ${MONTHS_SHORT[start.getMonth()]} ${start.getDate()}-${MONTHS_SHORT[end.getMonth()]} ${end.getDate()}${status}${comment}`;
+  }
+
+  function vacationStatusLabel(status) {
+    if (status === 'pending') return 'на согласовании';
+    if (status === 'rejected') return 'отклонен';
+    if (status === 'cancelled') return 'отменен';
+    return 'согласован';
   }
 
   async function loadStateFromCloud() {
     try {
-      const [v2Snapshot, legacySnapshot] = await Promise.all([
-        get(scheduleRef),
-        get(legacyStateRef)
-      ]);
+      const [scheduleSnapshot, legacySnapshot] = await Promise.all([get(scheduleRef), get(legacyStateRef)]);
+      const hasLegacy = legacySnapshot.exists() && Array.isArray(legacySnapshot.val()?.groups) && legacySnapshot.val().groups.length > 0;
 
-      if (v2Snapshot.exists()) {
-        const payload = v2Snapshot.val();
-        if (payload && payload.departments && payload.employees && payload.vacations) {
-          state = normalizeSchedulePayload(payload);
-          initialSource = 'v2';
+      if (scheduleSnapshot.exists()) {
+        const normalized = normalizeSchedulePayload(scheduleSnapshot.val());
+        if (hasRealScheduleContent(normalized) || !hasLegacy) {
+          state = normalized;
+          initialLoadDone = true;
           return;
         }
+        state = migrateLegacyState(legacySnapshot.val());
+        initialLoadDone = true;
+        return;
       }
 
-      if (legacySnapshot.exists()) {
-        const legacy = legacySnapshot.val();
-        if (legacy && Array.isArray(legacy.groups) && Array.isArray(legacy.vacations)) {
-          state = buildStateFromLegacy(legacy);
-          initialSource = 'legacy';
-          return;
-        }
+      if (hasLegacy) {
+        state = migrateLegacyState(legacySnapshot.val());
+        initialLoadDone = true;
+        return;
       }
 
-      state = buildEmptyState();
-      initialSource = 'empty';
+      state = ensureSeedStructure(buildEmptyState());
+      initialLoadDone = true;
     } catch (error) {
       console.error('Ошибка загрузки данных:', error);
-      state = buildEmptyState();
-      initialSource = 'empty';
-    }
-  }
-
-  async function saveFullStateToCloud() {
-    const payload = normalizeSchedulePayload({
-      ...state,
-      meta: {
-        ...state.meta,
-        year: YEAR,
-        version: APP_VERSION,
-        updatedAt: nowTs()
-      }
-    });
-
-    await set(scheduleRef, payload);
-    state = payload;
-  }
-
-  async function updateMetaTimestamp() {
-    try {
-      await update(ref(db, 'scheduleV2/meta'), {
-        year: YEAR,
-        version: APP_VERSION,
-        updatedAt: nowTs()
-      });
-    } catch (error) {
-      console.error('Ошибка обновления meta:', error);
+      state = ensureSeedStructure(buildEmptyState());
+      initialLoadDone = true;
     }
   }
 
   async function ensureScheduleInitialized() {
-    const snapshot = await get(scheduleRef);
-    if (snapshot.exists()) return;
     if (!isAdmin()) return;
-    await saveFullStateToCloud();
-    initialSource = 'v2';
+    try {
+      const [snapshot, legacySnapshot] = await Promise.all([get(scheduleRef), get(legacyStateRef)]);
+      const hasLegacy = legacySnapshot.exists() && Array.isArray(legacySnapshot.val()?.groups) && legacySnapshot.val().groups.length > 0;
+
+      if (!snapshot.exists()) {
+        await set(scheduleRef, normalizeSchedulePayload(state));
+        return;
+      }
+
+      const normalized = normalizeSchedulePayload(snapshot.val());
+      if (!hasRealScheduleContent(normalized) && hasLegacy) {
+        const migrated = migrateLegacyState(legacySnapshot.val());
+        await set(scheduleRef, migrated);
+      }
+    } catch (error) {
+      console.error('Ошибка инициализации scheduleV2:', error);
+    }
+  }
+
+  function subscribeToCloudUpdates() {
+    onValue(scheduleRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+      state = normalizeSchedulePayload(snapshot.val());
+      createMonthsHeader();
+      renderFilters();
+      renderBoard();
+      if (els.departmentAdminModalBackdrop.classList.contains('open')) {
+        renderDepartmentAdminModal();
+      }
+      if (els.accessAdminModalBackdrop.classList.contains('open')) {
+        loadAdminAccessData().then(renderAccessAdminModal).catch(console.error);
+      }
+    });
   }
 
   async function loadMyRole(uid) {
     try {
       const snapshot = await get(ref(db, `roles/${uid}`));
-      if (!snapshot.exists()) return null;
-      return snapshot.val() || null;
+      return snapshot.exists() ? snapshot.val() : null;
     } catch (error) {
       console.error('Ошибка загрузки роли:', error);
       return null;
@@ -515,13 +670,10 @@ import {
 
   async function tryApplyInviteRole(user) {
     if (!user?.email) return false;
-
     const key = emailKey(user.email);
-
     try {
       const inviteSnapshot = await get(ref(db, `roleInvites/${key}`));
       if (!inviteSnapshot.exists()) return false;
-
       const invite = inviteSnapshot.val();
       if (!invite || invite.isActive === false) return false;
 
@@ -564,93 +716,7 @@ import {
   function applyRoleRecord(roleRecord) {
     currentRoleRecord = roleRecord;
     currentRole = roleRecord?.role || 'viewer';
-    currentDepartmentIds = new Set(Object.keys(roleRecord?.departmentIds || {}).filter(depId => roleRecord.departmentIds[depId] === true));
-  }
-
-  function daysInMonth(monthIndex) {
-    return new Date(YEAR, monthIndex + 1, 0).getDate();
-  }
-
-  function isMonthCollapsed(monthIndex) {
-    return Array.isArray(collapsedMonths) && collapsedMonths.includes(monthIndex);
-  }
-
-  function getMonthWidth(monthIndex) {
-    return isMonthCollapsed(monthIndex)
-      ? COLLAPSED_MONTH_WIDTH
-      : daysInMonth(monthIndex) * PX_PER_DAY;
-  }
-
-  function getMonthOffset(monthIndex) {
-    let offset = 0;
-    for (let i = 0; i < monthIndex; i++) {
-      offset += getMonthWidth(i);
-    }
-    return offset;
-  }
-
-  function getDaysInYear() {
-    return 365;
-  }
-
-  function dayIndex(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    const start = new Date(`${YEAR}-01-01T00:00:00`);
-    return Math.floor((d - start) / 86400000);
-  }
-
-  function offsetForDate(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    const monthIndex = d.getMonth();
-    const day = d.getDate() - 1;
-    const baseOffset = getMonthOffset(monthIndex);
-    if (isMonthCollapsed(monthIndex)) return baseOffset;
-    return baseOffset + day * PX_PER_DAY;
-  }
-
-  function offsetForDayNumber(day) {
-    if (day >= getDaysInYear()) {
-      return MONTHS.reduce((sum, _, idx) => sum + getMonthWidth(idx), 0);
-    }
-
-    const date = new Date(`${YEAR}-01-01T00:00:00`);
-    date.setDate(date.getDate() + day);
-    const monthIndex = date.getMonth();
-    const dayInMonth = date.getDate() - 1;
-    const baseOffset = getMonthOffset(monthIndex);
-    return isMonthCollapsed(monthIndex) ? baseOffset : baseOffset + dayInMonth * PX_PER_DAY;
-  }
-
-  function durationWidth(startStr, endStr) {
-    const start = new Date(startStr + 'T00:00:00');
-    const end = new Date(endStr + 'T00:00:00');
-    let width = 0;
-    const cursor = new Date(start);
-
-    while (cursor <= end) {
-      const monthIndex = cursor.getMonth();
-      if (isMonthCollapsed(monthIndex)) {
-        width += COLLAPSED_MONTH_WIDTH;
-        const nextMonth = new Date(cursor);
-        nextMonth.setMonth(monthIndex + 1, 1);
-        nextMonth.setHours(0, 0, 0, 0);
-        cursor.setTime(nextMonth.getTime());
-      } else {
-        width += PX_PER_DAY;
-        cursor.setDate(cursor.getDate() + 1);
-      }
-    }
-
-    return Math.max(width - 2, 8);
-  }
-
-  function formatTooltip(vac) {
-    const employee = getEmployeeById(vac.employeeId);
-    const s = new Date(vac.start + 'T00:00:00');
-    const e = new Date(vac.end + 'T00:00:00');
-    const status = vac.status && vac.status !== 'approved' ? ` · ${statusLabel(vac.status)}` : '';
-    const comment = vac.comment ? ` · ${vac.comment}` : '';
-    return `${compactName(employee?.displayName || 'Сотрудник')} ${MONTHS_SHORT[s.getMonth()]} ${s.getDate()}-${MONTHS_SHORT[e.getMonth()]} ${e.getDate()}${status}${comment}`;
+    currentDepartmentIds = new Set(Object.keys(roleRecord?.departmentIds || {}).filter(id => roleRecord.departmentIds[id] === true));
   }
 
   function showTooltip(event, text) {
@@ -682,17 +748,14 @@ import {
       month.className = `month ${collapsed ? 'collapsed' : ''}`;
       month.style.width = `${width}px`;
       month.style.minWidth = `${width}px`;
-      month.title = collapsed ? `${name} — свернут, нажмите чтобы развернуть` : '';
 
       if (collapsed) {
-        month.innerHTML = `
-          <button class="month-collapse-pill" type="button" data-month="${monthIndex}" title="Развернуть ${name}" aria-label="Развернуть ${name}">›</button>
-        `;
+        month.innerHTML = `<button class="month-collapse-pill" type="button" data-month="${monthIndex}" title="Развернуть ${name}">›</button>`;
       } else {
         month.innerHTML = `
           <div class="month-head">
             <div class="month-name">${name}</div>
-            <button class="month-toggle-btn" type="button" data-month="${monthIndex}" title="Свернуть ${name}" aria-label="Свернуть ${name}">×</button>
+            <button class="month-toggle-btn" type="button" data-month="${monthIndex}" title="Свернуть ${name}">×</button>
           </div>
           <div class="days" style="grid-template-columns: repeat(${days}, minmax(0, 1fr));">
             ${Array.from({ length: days }, (_, i) => `<div class="day">${i + 1}</div>`).join('')}
@@ -710,17 +773,13 @@ import {
     renderMonthSeparators();
 
     els.months.querySelectorAll('.month-toggle-btn, .month-collapse-pill').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const monthIndex = Number(btn.dataset.month);
-        await toggleMonth(monthIndex);
-      });
+      btn.addEventListener('click', () => toggleMonth(Number(btn.dataset.month)));
     });
   }
 
   function renderMonthSeparators() {
     els.timelineGrid.innerHTML = '';
     let offset = 0;
-
     for (let i = 0; i < MONTHS.length - 1; i++) {
       offset += getMonthWidth(i);
       const line = document.createElement('div');
@@ -730,122 +789,128 @@ import {
     }
   }
 
-  async function toggleMonth(monthIndex) {
+  function toggleMonth(monthIndex) {
     if (collapsedMonths.includes(monthIndex)) {
       collapsedMonths = collapsedMonths.filter(item => item !== monthIndex);
     } else {
       collapsedMonths = [...collapsedMonths, monthIndex].sort((a, b) => a - b);
     }
-
     saveCollapsedMonths();
     createMonthsHeader();
     renderBoard();
   }
 
-  async function expandAllMonths() {
+  function expandAllMonths() {
     collapsedMonths = [];
     saveCollapsedMonths();
     createMonthsHeader();
     renderBoard();
   }
 
-  function getFilteredGroups() {
-    const selectedDepartmentId = els.groupFilter.value || 'all';
-    const q = normalizeText(els.searchInput.value);
+  function renderBranchFilter() {
+    const branches = getBranches();
+    const previous = els.branchFilter.value;
+    els.branchFilter.innerHTML = branches.map(branch => `<option value="${escapeHtml(branch.id)}">${escapeHtml(branch.name)}</option>`).join('');
+    const values = branches.map(branch => branch.id);
+    els.branchFilter.value = values.includes(previous) ? previous : (branches[0]?.id || NORTHWEST_BRANCH_ID);
+    els.branchBadge.textContent = getCurrentBranchName();
 
-    return getActiveDepartments()
-      .filter(dep => selectedDepartmentId === 'all' || dep.id === selectedDepartmentId)
-      .map(dep => ({
-        department: dep,
-        employees: getEmployees({ departmentId: dep.id }).filter(emp => !q || normalizeText(emp.displayName).includes(q))
-      }))
-      .filter(group => group.employees.length > 0);
+    els.adminDepartmentBranchSelect.innerHTML = branches.map(branch => `<option value="${escapeHtml(branch.id)}">${escapeHtml(branch.name)}</option>`).join('');
+    els.adminDepartmentBranchSelect.value = getCurrentBranchId();
   }
 
-  function renderFilters() {
-    const previousGroup = els.groupFilter.value || 'all';
-    const departments = getActiveDepartments();
-
-    els.groupFilter.innerHTML = `<option value="all">Все отделы</option>${departments
-      .map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`)
-      .join('')}`;
-
-    const availableValues = ['all', ...departments.map(dep => dep.id)];
-    els.groupFilter.value = availableValues.includes(previousGroup) ? previousGroup : 'all';
-
-    renderVacationEmployeeOptions();
-    renderRemoveEmployeeDepartmentOptions();
-    renderEmployeeDepartmentOptions();
+  function renderDepartmentFilter() {
+    const currentBranchId = getCurrentBranchId();
+    const previous = els.groupFilter.value || 'all';
+    const departments = getActiveDepartments(currentBranchId);
+    els.groupFilter.innerHTML = `<option value="all">Все отделы</option>${departments.map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`).join('')}`;
+    const values = ['all', ...departments.map(dep => dep.id)];
+    els.groupFilter.value = values.includes(previous) ? previous : 'all';
   }
 
   function renderVacationEmployeeOptions() {
-    const employees = getEmployees({ manageableOnly: !isAdmin() }).filter(emp => isAdmin() || canManageDepartment(emp.departmentId));
-
+    const branchId = getCurrentBranchId();
+    const employees = getEmployees({ branchId }).filter(emp => canManageEmployee(emp));
     if (employees.length === 0) {
       els.employeeSelect.innerHTML = '<option value="">Нет доступных сотрудников</option>';
       return;
     }
-
-    els.employeeSelect.innerHTML = employees
-      .map(emp => `<option value="${escapeHtml(emp.id)}">${escapeHtml(emp.displayName)} — ${escapeHtml(getDepartmentName(emp.departmentId))}</option>`)
-      .join('');
+    els.employeeSelect.innerHTML = employees.map(emp => `<option value="${escapeHtml(emp.id)}">${escapeHtml(emp.displayName)} — ${escapeHtml(getDepartmentName(emp.departmentId))}</option>`).join('');
   }
 
-  function renderEmployeeDepartmentOptions(query = els.employeeDepartmentSearch.value) {
-    const normalizedQuery = normalizeText(query);
-    const departments = getActiveDepartments().filter(dep => isAdmin() || canManageDepartment(dep.id));
-    const filtered = departments.filter(dep => !normalizedQuery || normalizeText(dep.name).includes(normalizedQuery));
+  function renderEmployeeDepartmentOptions() {
+    const query = normalizeText(els.employeeDepartmentSearch.value);
+    const departments = getActiveDepartments(getCurrentBranchId()).filter(dep => canManageDepartment(dep.id));
+    const filtered = departments.filter(dep => !query || normalizeText(dep.name).includes(query));
 
     if (filtered.length === 0) {
       els.employeeDepartmentSelect.innerHTML = '<option value="">Отдел не найден</option>';
       return;
     }
 
-    els.employeeDepartmentSelect.innerHTML = filtered
-      .map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`)
-      .join('');
+    els.employeeDepartmentSelect.innerHTML = filtered.map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`).join('');
   }
 
   function renderRemoveEmployeeDepartmentOptions() {
-    const previousValue = els.removeEmployeeGroupSelect.value || '';
-    const departments = getActiveDepartments().filter(dep => isAdmin() || canManageDepartment(dep.id));
-
+    const previous = els.removeEmployeeGroupSelect.value;
+    const departments = getActiveDepartments(getCurrentBranchId()).filter(dep => canManageDepartment(dep.id));
     if (departments.length === 0) {
       els.removeEmployeeGroupSelect.innerHTML = '<option value="">Нет доступных отделов</option>';
       els.removeEmployeeSelect.innerHTML = '<option value="">Нет сотрудников</option>';
       return;
     }
 
-    els.removeEmployeeGroupSelect.innerHTML = departments
-      .map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`)
-      .join('');
-
+    els.removeEmployeeGroupSelect.innerHTML = departments.map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`).join('');
     const values = departments.map(dep => dep.id);
-    els.removeEmployeeGroupSelect.value = values.includes(previousValue) ? previousValue : departments[0].id;
+    els.removeEmployeeGroupSelect.value = values.includes(previous) ? previous : departments[0].id;
     refreshRemoveEmployeeSelect();
   }
 
   function refreshRemoveEmployeeSelect() {
     const departmentId = els.removeEmployeeGroupSelect.value;
-    const employees = getEmployees({ departmentId, manageableOnly: !isAdmin() });
-
+    const employees = getEmployees({ departmentId }).filter(emp => canManageEmployee(emp));
     if (employees.length === 0) {
       els.removeEmployeeSelect.innerHTML = '<option value="">Нет сотрудников</option>';
       return;
     }
+    els.removeEmployeeSelect.innerHTML = employees.map(emp => `<option value="${escapeHtml(emp.id)}">${escapeHtml(emp.displayName)}</option>`).join('');
+  }
 
-    els.removeEmployeeSelect.innerHTML = employees
-      .map(emp => `<option value="${escapeHtml(emp.id)}">${escapeHtml(emp.displayName)}</option>`)
-      .join('');
+  function getFilteredGroups() {
+    const branchId = getCurrentBranchId();
+    const selectedDepartment = els.groupFilter.value || 'all';
+    const query = normalizeText(els.searchInput.value);
+
+    return getActiveDepartments(branchId)
+      .filter(dep => selectedDepartment === 'all' || dep.id === selectedDepartment)
+      .map(dep => ({
+        department: dep,
+        employees: getEmployees({ departmentId: dep.id }).filter(emp => !query || normalizeText(emp.displayName).includes(query))
+      }))
+      .filter(group => group.employees.length > 0);
+  }
+
+  function renderFilters() {
+    renderBranchFilter();
+    renderDepartmentFilter();
+    renderVacationEmployeeOptions();
+    renderEmployeeDepartmentOptions();
+    renderRemoveEmployeeDepartmentOptions();
   }
 
   function renderBoard() {
     const groups = getFilteredGroups();
     els.namesCol.innerHTML = '';
     els.timelineGroups.innerHTML = '';
+    els.branchBadge.textContent = getCurrentBranchName();
 
     let visibleEmployees = 0;
     let visibleVacations = 0;
+
+    if (groups.length === 0) {
+      els.namesCol.innerHTML = `<div class="empty-state">Нет сотрудников для отображения</div>`;
+      els.timelineGroups.innerHTML = `<div class="empty-state">Выберите другой филиал, отдел или очистите поиск</div>`;
+    }
 
     groups.forEach(group => {
       const namesGroup = document.createElement('div');
@@ -895,7 +960,6 @@ import {
             if (!canManageVacation(vac)) return;
             openVacationModal(vac);
           });
-
           rowTimeline.appendChild(bar);
         });
 
@@ -903,7 +967,6 @@ import {
       });
 
       addDepartmentOverlapLines(group.employees, bodyTimeline);
-
       namesGroup.appendChild(bodyNames);
       timelineGroup.appendChild(bodyTimeline);
 
@@ -911,11 +974,8 @@ import {
       els.timelineGroups.appendChild(timelineGroup);
     });
 
-    const hint = canEditAnything()
-      ? 'Двойной клик по полоске — редактирование доступного отпуска'
-      : 'Для редактирования войдите как руководитель';
-
-    els.status.textContent = `Сотрудников: ${visibleEmployees} · Отпусков: ${visibleVacations} · ${hint}`;
+    const hint = canEditAnything() ? 'Двойной клик по полоске — редактирование доступного отпуска' : 'Для редактирования войдите как руководитель';
+    els.status.textContent = `Филиал: ${getCurrentBranchName()} · Сотрудников: ${visibleEmployees} · Отпусков: ${visibleVacations} · ${hint}`;
   }
 
   function addDepartmentOverlapLines(employees, bodyTimeline) {
@@ -975,24 +1035,16 @@ import {
 
     els.loginBtn.hidden = !!currentUser;
     els.logoutBtn.hidden = !currentUser;
-
-    const canAddVacation = isAdmin() || (isManager() && getEmployees({ manageableOnly: true }).length > 0);
-    const canManageEmployees = isAdmin() || (isManager() && [...currentDepartmentIds].length > 0);
-
-    els.addBtn.hidden = !canAddVacation;
+    els.addBtn.hidden = !canEditAnything();
     els.resetBtn.hidden = !canResetAll();
-    els.addEmployeeToolbarBtn.hidden = !canManageEmployees;
-    els.removeEmployeeToolbarBtn.hidden = !canManageEmployees;
+    els.addEmployeeToolbarBtn.hidden = !canEditAnything();
+    els.removeEmployeeToolbarBtn.hidden = !canEditAnything();
     els.manageDepartmentsBtn.hidden = !canManageDepartments();
     els.manageAccessBtn.hidden = !canManageAccess();
-
-    renderFilters();
-    renderBoard();
   }
 
   function openVacationModal(vacation = null) {
     if (!canEditAnything()) return;
-
     renderVacationEmployeeOptions();
     els.modalBackdrop.classList.add('open');
 
@@ -1025,7 +1077,7 @@ import {
 
   function openEmployeeModal() {
     if (!canEditAnything()) return;
-    renderEmployeeDepartmentOptions('');
+    renderEmployeeDepartmentOptions();
     els.employeeDepartmentSearch.value = '';
     els.newEmployeeName.value = '';
     els.employeeModalBackdrop.classList.add('open');
@@ -1046,9 +1098,8 @@ import {
   }
 
   function openAuthModal() {
-    els.authEmail.value = '';
-    els.authPassword.value = '';
     els.authError.textContent = '';
+    els.authPassword.value = '';
     els.authModalBackdrop.classList.add('open');
   }
 
@@ -1056,12 +1107,12 @@ import {
     els.authModalBackdrop.classList.remove('open');
   }
 
-  function openDepartmentRequestModal(prefill = '') {
+  function openDepartmentRequestModal() {
     if (!currentUser) {
-      alert('Чтобы предложить новый отдел, войдите в систему.');
+      openAuthModal();
       return;
     }
-    els.departmentRequestName.value = String(prefill || '').trim();
+    els.departmentRequestName.value = '';
     els.departmentRequestError.textContent = '';
     els.departmentRequestModalBackdrop.classList.add('open');
   }
@@ -1070,8 +1121,20 @@ import {
     els.departmentRequestModalBackdrop.classList.remove('open');
   }
 
+  async function loadAdminAccessData() {
+    if (!isAdmin()) return;
+    const [rolesSnapshot, invitesSnapshot] = await Promise.all([get(rolesRootRef), get(invitesRootRef)]);
+    adminAccessSnapshot = {
+      roles: rolesSnapshot.exists() ? rolesSnapshot.val() : {},
+      roleInvites: invitesSnapshot.exists() ? invitesSnapshot.val() : {}
+    };
+  }
+
   function openDepartmentAdminModal() {
-    if (!canManageDepartments()) return;
+    if (!isAdmin()) return;
+    els.adminDepartmentError.textContent = '';
+    els.adminDepartmentName.value = '';
+    els.adminDepartmentBranchSelect.value = getCurrentBranchId();
     renderDepartmentAdminModal();
     els.departmentAdminModalBackdrop.classList.add('open');
   }
@@ -1080,75 +1143,215 @@ import {
     els.departmentAdminModalBackdrop.classList.remove('open');
   }
 
-  async function openAccessAdminModal() {
-    if (!canManageAccess()) return;
-    await loadAdminAccessData();
-    renderAccessAdminModal();
-    els.accessAdminModalBackdrop.classList.add('open');
+  function openAccessAdminModal() {
+    if (!isAdmin()) return;
+    els.accessInviteError.textContent = '';
+    loadAdminAccessData().then(() => {
+      renderAccessAdminModal();
+      els.accessAdminModalBackdrop.classList.add('open');
+    }).catch(error => {
+      console.error('Ошибка загрузки доступов:', error);
+      alert('Не удалось загрузить доступы');
+    });
   }
 
   function closeAccessAdminModal() {
     els.accessAdminModalBackdrop.classList.remove('open');
   }
 
-  function validateVacationForm(vacation, skipId = '') {
+  function getManagedDepartmentCheckboxValues() {
+    return Array.from(els.accessInviteDepartments.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+  }
+
+  function renderDepartmentAdminModal() {
+    const activeBranchId = els.adminDepartmentBranchSelect.value || getCurrentBranchId();
+    const departments = getActiveDepartments(activeBranchId);
+    const requests = Object.values(state.departmentRequests || {})
+      .filter(Boolean)
+      .filter(req => req.branchId === activeBranchId)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    if (departments.length === 0) {
+      els.departmentList.innerHTML = '<div class="admin-card">В этом филиале пока нет отделов.</div>';
+    } else {
+      els.departmentList.innerHTML = departments.map(dep => `
+        <div class="admin-card">
+          <div class="admin-card-header">
+            <div>
+              <div class="admin-card-title">${escapeHtml(dep.name)}</div>
+              <div class="admin-card-meta">${escapeHtml(getCurrentBranchId() === dep.branchId ? getCurrentBranchName() : (state.branches?.[dep.branchId]?.name || 'Филиал'))}</div>
+            </div>
+            <div class="card-actions">
+              <button type="button" data-action="rename-department" data-id="${escapeHtml(dep.id)}">Переименовать</button>
+              <button type="button" data-action="archive-department" data-id="${escapeHtml(dep.id)}" class="danger-btn">Архивировать</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    if (requests.length === 0) {
+      els.departmentRequestsList.innerHTML = '<div class="admin-card">Нет заявок для выбранного филиала.</div>';
+    } else {
+      els.departmentRequestsList.innerHTML = requests.map(req => `
+        <div class="admin-card">
+          <div class="admin-card-header">
+            <div>
+              <div class="admin-card-title">${escapeHtml(req.requestedName)}</div>
+              <div class="admin-card-meta">Статус: ${escapeHtml(req.status || 'pending')} · ${req.requestedByEmail ? escapeHtml(req.requestedByEmail) : 'без email'}</div>
+            </div>
+            <div class="card-actions">
+              <button type="button" data-action="approve-request" data-id="${escapeHtml(req.id)}">Одобрить</button>
+              <button type="button" data-action="reject-request" data-id="${escapeHtml(req.id)}" class="danger-btn">Отклонить</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    els.departmentList.querySelectorAll('[data-action="rename-department"]').forEach(btn => {
+      btn.onclick = () => renameDepartment(btn.dataset.id);
+    });
+    els.departmentList.querySelectorAll('[data-action="archive-department"]').forEach(btn => {
+      btn.onclick = () => archiveDepartment(btn.dataset.id);
+    });
+    els.departmentRequestsList.querySelectorAll('[data-action="approve-request"]').forEach(btn => {
+      btn.onclick = () => approveDepartmentRequest(btn.dataset.id);
+    });
+    els.departmentRequestsList.querySelectorAll('[data-action="reject-request"]').forEach(btn => {
+      btn.onclick = () => rejectDepartmentRequest(btn.dataset.id);
+    });
+  }
+
+  function renderAccessAdminModal() {
+    const branchGroups = getBranches().map(branch => ({
+      branch,
+      departments: getActiveDepartments(branch.id)
+    })).filter(group => group.departments.length > 0);
+
+    if (branchGroups.length === 0) {
+      els.accessInviteDepartments.innerHTML = '<div class="admin-card">Сначала создайте хотя бы один отдел.</div>';
+    } else {
+      els.accessInviteDepartments.innerHTML = branchGroups.map(group => `
+        <div class="checkbox-group">
+          <div class="checkbox-group-title">${escapeHtml(group.branch.name)}</div>
+          ${group.departments.map(dep => `
+            <label class="checkbox-item">
+              <input type="checkbox" value="${escapeHtml(dep.id)}">
+              <span>${escapeHtml(dep.name)}</span>
+            </label>
+          `).join('')}
+        </div>
+      `).join('');
+    }
+
+    const invites = Object.values(adminAccessSnapshot.roleInvites || {}).filter(Boolean).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    els.accessInviteList.innerHTML = invites.length === 0
+      ? '<div class="admin-card">Приглашений пока нет.</div>'
+      : invites.map(invite => `
+        <div class="admin-card">
+          <div class="admin-card-header">
+            <div>
+              <div class="admin-card-title">${escapeHtml(invite.email || 'Без email')}</div>
+              <div class="admin-card-meta">${escapeHtml((invite.role || 'manager') === 'manager' ? 'Руководитель' : invite.role)} · ${formatDepartmentNames(invite.departmentIds || {})}</div>
+            </div>
+            <div class="card-actions">
+              <button type="button" data-action="delete-invite" data-id="${escapeHtml(invite.key || emailKey(invite.email || ''))}" class="danger-btn">Удалить</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+    const roles = Object.entries(adminAccessSnapshot.roles || {})
+      .map(([uid, role]) => ({ uid, ...role }))
+      .sort((a, b) => (a.email || '').localeCompare(b.email || '', 'ru'));
+
+    els.accessRoleList.innerHTML = roles.length === 0
+      ? '<div class="admin-card">Ролей пока нет.</div>'
+      : roles.map(role => `
+        <div class="admin-card">
+          <div class="admin-card-header">
+            <div>
+              <div class="admin-card-title">${escapeHtml(role.email || role.uid)}</div>
+              <div class="admin-card-meta">${escapeHtml(roleLabel(role.role || 'viewer'))}${role.role === 'manager' ? ` · ${escapeHtml(formatDepartmentNames(role.departmentIds || {}))}` : ''}</div>
+            </div>
+            <div class="card-actions">
+              ${role.role === 'manager' ? `<button type="button" data-action="revoke-role" data-id="${escapeHtml(role.uid)}" class="danger-btn">Снять доступ</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+    els.accessInviteList.querySelectorAll('[data-action="delete-invite"]').forEach(btn => {
+      btn.onclick = () => deleteInvite(btn.dataset.id);
+    });
+    els.accessRoleList.querySelectorAll('[data-action="revoke-role"]').forEach(btn => {
+      btn.onclick = () => revokeManagerRole(btn.dataset.id);
+    });
+  }
+
+  function formatDepartmentNames(departmentIdsObj) {
+    const ids = Object.keys(departmentIdsObj || {}).filter(id => departmentIdsObj[id] === true);
+    if (ids.length === 0) return 'Все филиалы без закрепленных отделов';
+    return ids.map(getDepartmentName).join(', ');
+  }
+
+  function validateVacation(vacation, skipId = '') {
     if (!vacation.employeeId || !vacation.start || !vacation.end) return 'Заполните все обязательные поля';
     if (vacation.end < vacation.start) return 'Дата окончания не может быть раньше даты начала';
     if (!vacation.start.startsWith(`${YEAR}-`) || !vacation.end.startsWith(`${YEAR}-`)) return `Диапазон должен быть внутри ${YEAR} года`;
 
-    const employee = getEmployeeById(vacation.employeeId);
+    const employee = state.employees?.[vacation.employeeId];
     if (!employee) return 'Сотрудник не найден';
-    if (!canManageDepartment(employee.departmentId)) return 'Недостаточно прав для этого отдела';
+    if (!canManageEmployee(employee)) return 'Нет прав на этого сотрудника';
 
-    const overlap = Object.values(state.vacations || {}).find(existing =>
-      existing.employeeId === vacation.employeeId &&
-      existing.id !== skipId &&
-      !(vacation.end < existing.start || vacation.start > existing.end)
+    const overlap = Object.values(state.vacations || {}).find(item =>
+      item &&
+      item.employeeId === vacation.employeeId &&
+      item.id !== skipId &&
+      !(vacation.end < item.start || vacation.start > item.end)
     );
 
-    if (overlap) {
-      return `Пересечение с существующим отпуском: ${formatTooltip(overlap)}`;
-    }
-
+    if (overlap) return `Пересечение с существующим отпуском: ${formatTooltip(overlap)}`;
     return '';
+  }
+
+  async function writeVacation(vacation) {
+    await set(ref(db, `scheduleV2/vacations/${vacation.id}`), vacation);
   }
 
   async function saveVacation() {
     if (!canEditAnything()) {
-      alert('Недостаточно прав для редактирования');
+      alert('Недостаточно прав');
       return;
     }
 
-    const employee = getEmployeeById(els.employeeSelect.value);
-    if (!employee) {
-      alert('Выберите сотрудника');
-      return;
-    }
+    const employee = state.employees?.[els.employeeSelect.value];
+    const existing = els.vacationId.value ? state.vacations?.[els.vacationId.value] : null;
 
     const vacation = {
-      id: els.vacationId.value || makeId('vac', `${employee.displayName}-${els.startDate.value}`),
-      employeeId: employee.id,
-      departmentId: employee.departmentId,
+      id: els.vacationId.value || makeId('vac', `${employee?.displayName || 'employee'}-${els.startDate.value}`),
+      employeeId: els.employeeSelect.value,
+      departmentId: employee?.departmentId || existing?.departmentId || '',
       start: els.startDate.value,
       end: els.endDate.value,
       color: els.vacationColor.value,
       status: els.vacationStatus.value,
       comment: els.comment.value.trim(),
-      createdAt: state.vacations?.[els.vacationId.value]?.createdAt || nowTs(),
-      createdBy: state.vacations?.[els.vacationId.value]?.createdBy || (currentUser?.uid || 'system'),
+      createdAt: existing?.createdAt || nowTs(),
       updatedAt: nowTs(),
-      updatedBy: currentUser?.uid || 'system'
+      createdBy: existing?.createdBy || currentUser?.uid || 'unknown',
+      updatedBy: currentUser?.uid || 'unknown'
     };
 
-    const error = validateVacationForm(vacation, els.vacationId.value);
+    const error = validateVacation(vacation, els.vacationId.value);
     if (error) {
       alert(error);
       return;
     }
 
     try {
-      await set(ref(db, `scheduleV2/vacations/${vacation.id}`), vacation);
-      await updateMetaTimestamp();
+      await writeVacation(vacation);
       closeVacationModal();
     } catch (error) {
       console.error('Ошибка сохранения отпуска:', error);
@@ -1157,20 +1360,17 @@ import {
   }
 
   async function deleteVacation() {
-    const vacationId = els.vacationId.value;
-    if (!vacationId) return;
-
-    const vacation = state.vacations?.[vacationId];
-    if (!vacation || !canManageVacation(vacation)) {
-      alert('Недостаточно прав для удаления');
+    const id = els.vacationId.value;
+    if (!id) return;
+    const existing = state.vacations?.[id];
+    if (!canManageVacation(existing)) {
+      alert('Недостаточно прав');
       return;
     }
-
-    if (!confirm('Удалить этот отпуск?')) return;
+    if (!confirm('Удалить отпуск?')) return;
 
     try {
-      await remove(ref(db, `scheduleV2/vacations/${vacationId}`));
-      await updateMetaTimestamp();
+      await remove(ref(db, `scheduleV2/vacations/${id}`));
       closeVacationModal();
     } catch (error) {
       console.error('Ошибка удаления отпуска:', error);
@@ -1180,15 +1380,12 @@ import {
 
   async function resetAllVacations() {
     if (!canResetAll()) {
-      alert('Полный сброс доступен только администратору');
+      alert('Недостаточно прав');
       return;
     }
-
-    if (!confirm('Удалить вообще все отпуска? Это действие нельзя отменить.')) return;
-
+    if (!confirm('Удалить все отпуска во всех филиалах?')) return;
     try {
       await set(ref(db, 'scheduleV2/vacations'), {});
-      await updateMetaTimestamp();
     } catch (error) {
       console.error('Ошибка сброса отпусков:', error);
       alert('Не удалось сбросить отпуска');
@@ -1202,39 +1399,40 @@ import {
     }
 
     const departmentId = els.employeeDepartmentSelect.value;
-    const fullName = els.newEmployeeName.value.trim().replace(/\s+/g, ' ');
+    const displayName = els.newEmployeeName.value.trim().replace(/\s+/g, ' ');
+    const department = state.departments?.[departmentId];
 
-    if (!departmentId || !fullName) {
+    if (!departmentId || !displayName) {
       alert('Укажите отдел и ФИО сотрудника');
       return;
     }
-
+    if (!department) {
+      alert('Отдел не найден');
+      return;
+    }
     if (!canManageDepartment(departmentId)) {
-      alert('Недостаточно прав для выбранного отдела');
+      alert('Недостаточно прав для этого отдела');
       return;
     }
 
-    const exists = getEmployees({ departmentId, activeOnly: false }).some(emp => normalizeText(emp.displayName) === normalizeText(fullName));
-    if (exists) {
+    const duplicate = getEmployees({ departmentId }).some(emp => normalizeText(emp.displayName) === normalizeText(displayName));
+    if (duplicate) {
       alert('Такой сотрудник уже есть в выбранном отделе');
       return;
     }
 
-    const employeeId = makeId('emp', `${departmentId}-${fullName}`);
+    const employeeId = makeId('emp', `${department.name}-${displayName}`);
     const employee = {
       id: employeeId,
-      displayName: fullName,
+      displayName,
       departmentId,
       isActive: true,
       createdAt: nowTs(),
-      updatedAt: nowTs(),
-      createdBy: currentUser?.uid || 'system',
-      updatedBy: currentUser?.uid || 'system'
+      createdBy: currentUser?.uid || 'unknown'
     };
 
     try {
       await set(ref(db, `scheduleV2/employees/${employeeId}`), employee);
-      await updateMetaTimestamp();
       closeEmployeeModal();
     } catch (error) {
       console.error('Ошибка добавления сотрудника:', error);
@@ -1242,38 +1440,28 @@ import {
     }
   }
 
-  async function removeEmployeeByModal() {
-    if (!canEditAnything()) {
-      alert('Недостаточно прав');
-      return;
-    }
-
+  async function removeEmployee() {
     const employeeId = els.removeEmployeeSelect.value;
-    const employee = getEmployeeById(employeeId);
+    const employee = state.employees?.[employeeId];
     if (!employee) {
       alert('Сотрудник не найден');
       return;
     }
-
-    if (!canManageDepartment(employee.departmentId)) {
-      alert('Недостаточно прав для удаления этого сотрудника');
+    if (!canManageEmployee(employee)) {
+      alert('Недостаточно прав');
       return;
     }
+    if (!confirm(`Удалить сотрудника "${employee.displayName}" и все его отпуска?`)) return;
 
-    if (!confirm(`Удалить сотрудника «${employee.displayName}» и все его отпуска?`)) return;
+    const updates = {
+      [`scheduleV2/employees/${employeeId}`]: null
+    };
 
-    const updates = {};
-    updates[`scheduleV2/employees/${employeeId}`] = null;
-
-    Object.values(state.vacations || {}).forEach(vacation => {
-      if (vacation.employeeId === employeeId) {
-        updates[`scheduleV2/vacations/${vacation.id}`] = null;
+    Object.values(state.vacations || {}).forEach(vac => {
+      if (vac && vac.employeeId === employeeId) {
+        updates[`scheduleV2/vacations/${vac.id}`] = null;
       }
     });
-
-    updates['scheduleV2/meta/updatedAt'] = nowTs();
-    updates['scheduleV2/meta/year'] = YEAR;
-    updates['scheduleV2/meta/version'] = APP_VERSION;
 
     try {
       await update(ref(db), updates);
@@ -1284,459 +1472,234 @@ import {
     }
   }
 
-  async function createDepartmentRequest() {
+  async function createDepartmentDirect() {
+    if (!isAdmin()) return;
+    const branchId = els.adminDepartmentBranchSelect.value;
+    const name = els.adminDepartmentName.value.trim().replace(/\s+/g, ' ');
+    els.adminDepartmentError.textContent = '';
+
+    if (!branchId || !name) {
+      els.adminDepartmentError.textContent = 'Выберите филиал и введите название отдела';
+      return;
+    }
+
+    const exists = Object.values(state.departments || {}).some(dep => dep && dep.branchId === branchId && normalizeText(dep.name) === normalizeText(name) && dep.status !== 'archived');
+    if (exists) {
+      els.adminDepartmentError.textContent = 'Такой отдел уже существует в выбранном филиале';
+      return;
+    }
+
+    const departmentId = makeId('dep', `${branchId}-${name}`);
+    const department = {
+      id: departmentId,
+      name,
+      branchId,
+      status: 'active',
+      createdAt: nowTs(),
+      createdBy: currentUser?.uid || 'unknown'
+    };
+
+    try {
+      await set(ref(db, `scheduleV2/departments/${departmentId}`), department);
+      els.adminDepartmentName.value = '';
+      renderFilters();
+    } catch (error) {
+      console.error('Ошибка создания отдела:', error);
+      els.adminDepartmentError.textContent = 'Не удалось создать отдел';
+    }
+  }
+
+  async function renameDepartment(departmentId) {
+    if (!isAdmin()) return;
+    const department = state.departments?.[departmentId];
+    if (!department) return;
+
+    const nextName = prompt('Новое название отдела', department.name);
+    if (!nextName) return;
+    const normalized = nextName.trim().replace(/\s+/g, ' ');
+    if (!normalized) return;
+
+    try {
+      await update(ref(db, `scheduleV2/departments/${departmentId}`), {
+        name: normalized,
+        updatedAt: nowTs(),
+        updatedBy: currentUser?.uid || 'unknown'
+      });
+    } catch (error) {
+      console.error('Ошибка переименования отдела:', error);
+      alert('Не удалось переименовать отдел');
+    }
+  }
+
+  async function archiveDepartment(departmentId) {
+    if (!isAdmin()) return;
+    const department = state.departments?.[departmentId];
+    if (!department) return;
+    const hasEmployees = getEmployees({ departmentId }).length > 0;
+    if (hasEmployees) {
+      alert('Сначала переместите или удалите сотрудников из отдела');
+      return;
+    }
+    if (!confirm(`Архивировать отдел "${department.name}"?`)) return;
+
+    try {
+      await update(ref(db, `scheduleV2/departments/${departmentId}`), {
+        status: 'archived',
+        updatedAt: nowTs(),
+        updatedBy: currentUser?.uid || 'unknown'
+      });
+    } catch (error) {
+      console.error('Ошибка архивации отдела:', error);
+      alert('Не удалось архивировать отдел');
+    }
+  }
+
+  async function saveDepartmentRequest() {
     if (!currentUser) {
-      els.departmentRequestError.textContent = 'Нужно войти в систему';
+      openAuthModal();
       return;
     }
 
     const requestedName = els.departmentRequestName.value.trim().replace(/\s+/g, ' ');
-    const normalizedName = normalizeText(requestedName);
+    const branchId = getCurrentBranchId();
+    els.departmentRequestError.textContent = '';
 
     if (!requestedName) {
       els.departmentRequestError.textContent = 'Введите название отдела';
       return;
     }
 
-    const existingDepartment = getAllDepartments().find(dep => normalizeText(dep.name) === normalizedName);
-    if (existingDepartment) {
-      els.departmentRequestError.textContent = 'Такой отдел уже существует';
+    const exists = getActiveDepartments(branchId).some(dep => normalizeText(dep.name) === normalizeText(requestedName));
+    if (exists) {
+      els.departmentRequestError.textContent = 'Такой отдел уже есть в этом филиале';
       return;
     }
 
-    const existingPending = getDepartmentRequests().find(req => req.status === 'pending' && req.normalizedName === normalizedName);
-    if (existingPending) {
-      els.departmentRequestError.textContent = 'Такая заявка уже отправлена';
-      return;
-    }
-
-    const requestId = makeId('req', requestedName);
-    const requestPayload = {
+    const requestId = makeId('req', `${branchId}-${requestedName}`);
+    const requestData = {
       id: requestId,
+      branchId,
       requestedName,
-      normalizedName,
+      normalizedName: normalizeText(requestedName),
       status: 'pending',
-      requestedBy: currentUser.uid,
-      requestedByEmail: normalizeEmail(currentUser.email || ''),
-      createdAt: nowTs(),
-      updatedAt: nowTs()
+      requestedBy: currentUser?.uid || 'unknown',
+      requestedByEmail: currentUser?.email || '',
+      createdAt: nowTs()
     };
 
     try {
-      await set(ref(db, `scheduleV2/departmentRequests/${requestId}`), requestPayload);
-      await updateMetaTimestamp();
+      await set(ref(db, `scheduleV2/departmentRequests/${requestId}`), requestData);
       closeDepartmentRequestModal();
-      alert('Заявка на новый отдел отправлена');
+      alert('Заявка отправлена');
     } catch (error) {
       console.error('Ошибка создания заявки:', error);
       els.departmentRequestError.textContent = 'Не удалось отправить заявку';
     }
   }
 
-  async function addDepartmentDirect() {
-    if (!canManageDepartments()) return;
+  async function approveDepartmentRequest(requestId) {
+    if (!isAdmin()) return;
+    const requestData = state.departmentRequests?.[requestId];
+    if (!requestData) return;
 
-    const name = els.adminDepartmentName.value.trim().replace(/\s+/g, ' ');
-    if (!name) {
-      els.adminDepartmentError.textContent = 'Введите название отдела';
-      return;
-    }
-
-    const duplicate = getAllDepartments().find(dep => normalizeText(dep.name) === normalizeText(name));
-    if (duplicate) {
-      els.adminDepartmentError.textContent = 'Такой отдел уже есть';
-      return;
-    }
-
-    const departmentId = makeId('dep', name);
-    const payload = {
-      id: departmentId,
-      name,
-      status: 'active',
-      sortOrder: getAllDepartments().length + 1,
-      createdAt: nowTs(),
-      updatedAt: nowTs(),
-      createdBy: currentUser?.uid || 'system',
-      updatedBy: currentUser?.uid || 'system'
-    };
-
-    try {
-      await set(ref(db, `scheduleV2/departments/${departmentId}`), payload);
-      await updateMetaTimestamp();
-      els.adminDepartmentName.value = '';
-      els.adminDepartmentError.textContent = '';
-    } catch (error) {
-      console.error('Ошибка добавления отдела:', error);
-      els.adminDepartmentError.textContent = 'Не удалось создать отдел';
-    }
-  }
-
-  function renderDepartmentAdminModal() {
-    els.adminDepartmentError.textContent = '';
-    els.departmentList.innerHTML = '';
-    els.departmentRequestsList.innerHTML = '';
-
-    const departments = getAllDepartments();
-    if (departments.length === 0) {
-      els.departmentList.innerHTML = '<div class="admin-empty">Отделов пока нет</div>';
-    } else {
-      departments.forEach(dep => {
-        const item = document.createElement('div');
-        item.className = 'admin-row';
-        item.innerHTML = `
-          <div class="admin-row-main">
-            <input class="admin-inline-input" data-department-input="${dep.id}" value="${escapeHtml(dep.name)}">
-            <span class="badge ${dep.status === 'archived' ? 'badge-muted' : 'badge-ok'}">${dep.status === 'archived' ? 'Архив' : 'Активен'}</span>
-          </div>
-          <div class="admin-row-actions">
-            <button type="button" class="mini-btn" data-action="rename-department" data-department-id="${dep.id}">Сохранить</button>
-            <button type="button" class="mini-btn ${dep.status === 'archived' ? '' : 'danger-soft'}" data-action="toggle-department" data-department-id="${dep.id}">${dep.status === 'archived' ? 'Восстановить' : 'В архив'}</button>
-          </div>
-        `;
-        els.departmentList.appendChild(item);
-      });
-    }
-
-    const requests = getDepartmentRequests();
-    if (requests.length === 0) {
-      els.departmentRequestsList.innerHTML = '<div class="admin-empty">Заявок пока нет</div>';
-    } else {
-      requests.forEach(req => {
-        const departmentOptions = getActiveDepartments()
-          .map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`)
-          .join('');
-
-        const item = document.createElement('div');
-        item.className = 'admin-row request-row';
-        item.innerHTML = `
-          <div class="admin-row-main request-main">
-            <div>
-              <div class="request-title">${escapeHtml(req.requestedName)}</div>
-              <div class="request-meta">${escapeHtml(req.requestedByEmail || 'без email')} · ${formatDateTime(req.createdAt)}</div>
-            </div>
-            <span class="badge ${req.status === 'pending' ? 'badge-warn' : req.status === 'rejected' ? 'badge-danger' : 'badge-ok'}">${escapeHtml(requestStatusLabel(req.status))}</span>
-          </div>
-          ${req.status === 'pending' ? `
-            <div class="request-controls">
-              <select data-request-link-select="${req.id}">
-                <option value="">Привязать к существующему отделу</option>
-                ${departmentOptions}
-              </select>
-              <div class="admin-row-actions">
-                <button type="button" class="mini-btn" data-action="approve-request" data-request-id="${req.id}">Создать отдел</button>
-                <button type="button" class="mini-btn" data-action="link-request" data-request-id="${req.id}">Привязать</button>
-                <button type="button" class="mini-btn danger-soft" data-action="reject-request" data-request-id="${req.id}">Отклонить</button>
-              </div>
-            </div>
-          ` : req.linkedDepartmentId ? `<div class="request-meta">Отдел: ${escapeHtml(getDepartmentName(req.linkedDepartmentId))}</div>` : ''}
-        `;
-        els.departmentRequestsList.appendChild(item);
-      });
-    }
-  }
-
-  async function renameDepartment(departmentId) {
-    const input = els.departmentList.querySelector(`[data-department-input="${departmentId}"]`);
-    if (!input) return;
-    const name = input.value.trim().replace(/\s+/g, ' ');
-    if (!name) {
-      alert('Название отдела не может быть пустым');
-      return;
-    }
-
-    const duplicate = getAllDepartments().find(dep => dep.id !== departmentId && normalizeText(dep.name) === normalizeText(name));
-    if (duplicate) {
-      alert('Отдел с таким названием уже существует');
-      return;
-    }
-
-    try {
-      await update(ref(db, `scheduleV2/departments/${departmentId}`), {
-        name,
-        updatedAt: nowTs(),
-        updatedBy: currentUser?.uid || 'system'
-      });
-      await updateMetaTimestamp();
-    } catch (error) {
-      console.error('Ошибка переименования отдела:', error);
-      alert('Не удалось сохранить название отдела');
-    }
-  }
-
-  async function toggleDepartmentStatus(departmentId) {
-    const department = state.departments?.[departmentId];
-    if (!department) return;
-
-    const nextStatus = department.status === 'archived' ? 'active' : 'archived';
-    const message = nextStatus === 'archived'
-      ? `Перевести отдел «${department.name}» в архив?`
-      : `Восстановить отдел «${department.name}»?`;
-
-    if (!confirm(message)) return;
-
-    try {
-      await update(ref(db, `scheduleV2/departments/${departmentId}`), {
-        status: nextStatus,
-        updatedAt: nowTs(),
-        updatedBy: currentUser?.uid || 'system'
-      });
-      await updateMetaTimestamp();
-    } catch (error) {
-      console.error('Ошибка смены статуса отдела:', error);
-      alert('Не удалось обновить отдел');
-    }
-  }
-
-  async function approveDepartmentRequestAsNew(requestId) {
-    const request = state.departmentRequests?.[requestId];
-    if (!request || request.status !== 'pending') return;
-
-    const departmentId = makeId('dep', request.requestedName);
-    const payload = {
-      id: departmentId,
-      name: request.requestedName,
-      status: 'active',
-      sortOrder: getAllDepartments().length + 1,
-      createdAt: nowTs(),
-      updatedAt: nowTs(),
-      createdBy: currentUser?.uid || 'system',
-      updatedBy: currentUser?.uid || 'system'
-    };
-
+    const duplicate = getActiveDepartments(requestData.branchId).some(dep => normalizeText(dep.name) === normalizeText(requestData.requestedName));
     const updates = {};
-    updates[`scheduleV2/departments/${departmentId}`] = payload;
+    if (!duplicate) {
+      const departmentId = makeId('dep', `${requestData.branchId}-${requestData.requestedName}`);
+      updates[`scheduleV2/departments/${departmentId}`] = {
+        id: departmentId,
+        name: requestData.requestedName,
+        branchId: requestData.branchId,
+        status: 'active',
+        createdAt: nowTs(),
+        createdBy: currentUser?.uid || 'unknown',
+        sourceRequestId: requestId
+      };
+    }
     updates[`scheduleV2/departmentRequests/${requestId}/status`] = 'approved';
-    updates[`scheduleV2/departmentRequests/${requestId}/linkedDepartmentId`] = departmentId;
-    updates[`scheduleV2/departmentRequests/${requestId}/reviewedAt`] = nowTs();
-    updates[`scheduleV2/departmentRequests/${requestId}/reviewedBy`] = currentUser?.uid || 'system';
-    updates[`scheduleV2/departmentRequests/${requestId}/updatedAt`] = nowTs();
-    updates['scheduleV2/meta/updatedAt'] = nowTs();
-    updates['scheduleV2/meta/year'] = YEAR;
-    updates['scheduleV2/meta/version'] = APP_VERSION;
+    updates[`scheduleV2/departmentRequests/${requestId}/resolvedAt`] = nowTs();
+    updates[`scheduleV2/departmentRequests/${requestId}/resolvedBy`] = currentUser?.uid || 'unknown';
 
     try {
       await update(ref(db), updates);
+      renderFilters();
     } catch (error) {
-      console.error('Ошибка подтверждения заявки:', error);
-      alert('Не удалось создать отдел по заявке');
-    }
-  }
-
-  async function linkDepartmentRequest(requestId, departmentId) {
-    const request = state.departmentRequests?.[requestId];
-    if (!request || request.status !== 'pending') return;
-    if (!departmentId) {
-      alert('Выберите отдел для привязки');
-      return;
-    }
-
-    try {
-      await update(ref(db, `scheduleV2/departmentRequests/${requestId}`), {
-        status: 'linked',
-        linkedDepartmentId: departmentId,
-        reviewedAt: nowTs(),
-        reviewedBy: currentUser?.uid || 'system',
-        updatedAt: nowTs()
-      });
-      await updateMetaTimestamp();
-    } catch (error) {
-      console.error('Ошибка привязки заявки:', error);
-      alert('Не удалось привязать заявку');
+      console.error('Ошибка одобрения заявки:', error);
+      alert('Не удалось одобрить заявку');
     }
   }
 
   async function rejectDepartmentRequest(requestId) {
-    const request = state.departmentRequests?.[requestId];
-    if (!request || request.status !== 'pending') return;
-    if (!confirm(`Отклонить заявку «${request.requestedName}»?`)) return;
-
+    if (!isAdmin()) return;
+    if (!confirm('Отклонить заявку?')) return;
     try {
       await update(ref(db, `scheduleV2/departmentRequests/${requestId}`), {
         status: 'rejected',
-        reviewedAt: nowTs(),
-        reviewedBy: currentUser?.uid || 'system',
-        updatedAt: nowTs()
+        resolvedAt: nowTs(),
+        resolvedBy: currentUser?.uid || 'unknown'
       });
-      await updateMetaTimestamp();
     } catch (error) {
       console.error('Ошибка отклонения заявки:', error);
       alert('Не удалось отклонить заявку');
     }
   }
 
-  async function loadAdminAccessData() {
-    const [rolesSnapshot, invitesSnapshot] = await Promise.all([
-      get(rolesRootRef),
-      get(invitesRootRef)
-    ]);
-
-    adminAccessSnapshot = {
-      roles: rolesSnapshot.exists() ? rolesSnapshot.val() || {} : {},
-      roleInvites: invitesSnapshot.exists() ? invitesSnapshot.val() || {} : {}
-    };
-  }
-
-  function renderInviteDepartmentCheckboxes(selected = {}) {
-    const departments = getActiveDepartments();
-    if (departments.length === 0) {
-      els.accessInviteDepartments.innerHTML = '<div class="admin-empty">Сначала создайте отделы</div>';
-      return;
-    }
-
-    els.accessInviteDepartments.innerHTML = departments
-      .map(dep => `
-        <label class="checkbox-chip">
-          <input type="checkbox" value="${escapeHtml(dep.id)}" ${selected[dep.id] ? 'checked' : ''}>
-          <span>${escapeHtml(dep.name)}</span>
-        </label>
-      `)
-      .join('');
-  }
-
-  function renderAccessAdminModal() {
-    els.accessInviteError.textContent = '';
-    els.accessInviteEmail.value = '';
-    els.accessInviteSaveBtn.dataset.editKey = '';
-    renderInviteDepartmentCheckboxes({});
-
-    const invites = Object.values(adminAccessSnapshot.roleInvites || {})
-      .filter(Boolean)
-      .sort((a, b) => String(a.email).localeCompare(String(b.email), 'ru'));
-
-    const roles = Object.entries(adminAccessSnapshot.roles || {})
-      .map(([uid, value]) => ({ uid, ...(value || {}) }))
-      .sort((a, b) => String(a.email || a.uid).localeCompare(String(b.email || b.uid), 'ru'));
-
-    if (invites.length === 0) {
-      els.accessInviteList.innerHTML = '<div class="admin-empty">Приглашений пока нет</div>';
-    } else {
-      els.accessInviteList.innerHTML = invites.map(invite => `
-        <div class="admin-row">
-          <div class="admin-row-main">
-            <div>
-              <div class="request-title">${escapeHtml(invite.email)}</div>
-              <div class="request-meta">Отделы: ${escapeHtml(Object.keys(invite.departmentIds || {}).map(getDepartmentName).join(', ') || 'не выбраны')}</div>
-            </div>
-            <span class="badge ${invite.isActive === false ? 'badge-muted' : 'badge-ok'}">${invite.isActive === false ? 'Отключено' : 'Активно'}</span>
-          </div>
-          <div class="admin-row-actions">
-            <button type="button" class="mini-btn" data-action="edit-invite" data-email-key="${escapeHtml(emailKey(invite.email))}">Изменить</button>
-            <button type="button" class="mini-btn danger-soft" data-action="revoke-invite" data-email-key="${escapeHtml(emailKey(invite.email))}">Отозвать</button>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    if (roles.length === 0) {
-      els.accessRoleList.innerHTML = '<div class="admin-empty">Назначенных ролей пока нет</div>';
-    } else {
-      els.accessRoleList.innerHTML = roles.map(role => `
-        <div class="admin-row">
-          <div class="admin-row-main">
-            <div>
-              <div class="request-title">${escapeHtml(role.email || role.uid)}</div>
-              <div class="request-meta">${escapeHtml(roleLabel(role.role))} · Отделы: ${escapeHtml(Object.keys(role.departmentIds || {}).map(getDepartmentName).join(', ') || 'все')}</div>
-            </div>
-            <span class="badge ${role.role === 'admin' ? 'badge-warn' : 'badge-ok'}">${escapeHtml(role.role)}</span>
-          </div>
-          <div class="admin-row-actions">
-            ${role.role === 'manager' ? `<button type="button" class="mini-btn danger-soft" data-action="revoke-role" data-uid="${escapeHtml(role.uid)}">Снять доступ</button>` : ''}
-          </div>
-        </div>
-      `).join('');
-    }
-  }
-
-  function collectSelectedInviteDepartmentIds() {
-    const result = {};
-    els.accessInviteDepartments.querySelectorAll('input[type="checkbox"]:checked').forEach(input => {
-      result[input.value] = true;
-    });
-    return result;
-  }
-
-  async function saveManagerInvite(prefillKey = null) {
-    if (!canManageAccess()) return;
-
+  async function saveInvite() {
+    if (!isAdmin()) return;
     const email = normalizeEmail(els.accessInviteEmail.value);
-    const departmentIds = collectSelectedInviteDepartmentIds();
+    const departmentIds = getManagedDepartmentCheckboxValues();
+    els.accessInviteError.textContent = '';
 
     if (!email) {
       els.accessInviteError.textContent = 'Введите email';
       return;
     }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      els.accessInviteError.textContent = 'Некорректный email';
-      return;
-    }
-
-    if (Object.keys(departmentIds).length === 0) {
+    if (departmentIds.length === 0) {
       els.accessInviteError.textContent = 'Выберите хотя бы один отдел';
       return;
     }
 
-    const key = prefillKey || emailKey(email);
-    const payload = {
+    const key = emailKey(email);
+    const departmentMap = Object.fromEntries(departmentIds.map(id => [id, true]));
+    const invite = {
+      key,
       email,
       role: 'manager',
-      departmentIds,
+      departmentIds: departmentMap,
       isActive: true,
-      createdAt: adminAccessSnapshot.roleInvites?.[key]?.createdAt || nowTs(),
-      updatedAt: nowTs(),
-      createdBy: adminAccessSnapshot.roleInvites?.[key]?.createdBy || currentUser?.uid || 'system',
-      updatedBy: currentUser?.uid || 'system'
+      createdAt: nowTs(),
+      createdBy: currentUser?.uid || 'unknown'
     };
 
     try {
-      await set(ref(db, `roleInvites/${key}`), payload);
-
-      const matchingRoleEntry = Object.entries(adminAccessSnapshot.roles || {}).find(([, value]) => normalizeEmail(value?.email) === email);
-      if (matchingRoleEntry) {
-        const [uid, roleData] = matchingRoleEntry;
-        if (roleData.role === 'manager') {
-          await update(ref(db, `roles/${uid}`), {
-            departmentIds,
-            email,
-            inviteKey: key,
-            source: 'invite',
-            updatedAt: nowTs()
-          });
-        }
-      }
-
+      await set(ref(db, `roleInvites/${key}`), invite);
+      els.accessInviteEmail.value = '';
+      Array.from(els.accessInviteDepartments.querySelectorAll('input[type="checkbox"]')).forEach(input => {
+        input.checked = false;
+      });
       await loadAdminAccessData();
       renderAccessAdminModal();
     } catch (error) {
-      console.error('Ошибка сохранения доступа:', error);
-      els.accessInviteError.textContent = 'Не удалось сохранить доступ';
+      console.error('Ошибка сохранения приглашения:', error);
+      els.accessInviteError.textContent = 'Не удалось сохранить приглашение';
     }
   }
 
-  async function startEditingInvite(emailKeyValue) {
-    const invite = adminAccessSnapshot.roleInvites?.[emailKeyValue];
-    if (!invite) return;
-    els.accessInviteEmail.value = invite.email || '';
-    renderInviteDepartmentCheckboxes(invite.departmentIds || {});
-    els.accessInviteSaveBtn.dataset.editKey = emailKeyValue;
-  }
-
-  async function revokeInvite(emailKeyValue) {
-    const invite = adminAccessSnapshot.roleInvites?.[emailKeyValue];
-    if (!invite) return;
-    if (!confirm(`Отозвать приглашение для ${invite.email}?`)) return;
-
+  async function deleteInvite(key) {
+    if (!isAdmin()) return;
+    if (!confirm('Удалить приглашение?')) return;
     try {
-      await remove(ref(db, `roleInvites/${emailKeyValue}`));
+      await remove(ref(db, `roleInvites/${key}`));
       await loadAdminAccessData();
       renderAccessAdminModal();
     } catch (error) {
-      console.error('Ошибка отзыва приглашения:', error);
-      alert('Не удалось отозвать приглашение');
+      console.error('Ошибка удаления приглашения:', error);
+      alert('Не удалось удалить приглашение');
     }
   }
 
   async function revokeManagerRole(uid) {
+    if (!isAdmin()) return;
     const role = adminAccessSnapshot.roles?.[uid];
     if (!role || role.role !== 'manager') return;
     if (!confirm(`Снять права руководителя у ${role.email || uid}?`)) return;
@@ -1746,7 +1709,7 @@ import {
       await loadAdminAccessData();
       renderAccessAdminModal();
     } catch (error) {
-      console.error('Ошибка отзыва роли:', error);
+      console.error('Ошибка снятия роли:', error);
       alert('Не удалось снять доступ');
     }
   }
@@ -1754,7 +1717,6 @@ import {
   async function signIn() {
     const email = normalizeEmail(els.authEmail.value);
     const password = els.authPassword.value;
-
     if (!email || !password) {
       els.authError.textContent = 'Введите email и пароль';
       return;
@@ -1773,12 +1735,10 @@ import {
   async function registerAccount() {
     const email = normalizeEmail(els.authEmail.value);
     const password = els.authPassword.value;
-
     if (!email || !password) {
       els.authError.textContent = 'Введите email и пароль';
       return;
     }
-
     if (password.length < 6) {
       els.authError.textContent = 'Пароль должен быть не короче 6 символов';
       return;
@@ -1799,37 +1759,48 @@ import {
       await signOut(auth);
     } catch (error) {
       console.error('Ошибка выхода:', error);
-      alert('Не удалось выйти из аккаунта');
+      alert('Не удалось выйти');
     }
-  }
-
-  function subscribeToCloudUpdates() {
-    onValue(scheduleRef, (snapshot) => {
-      if (snapshot.exists()) {
-        state = normalizeSchedulePayload(snapshot.val());
-        createMonthsHeader();
-        renderFilters();
-        renderBoard();
-        if (els.departmentAdminModalBackdrop.classList.contains('open')) {
-          renderDepartmentAdminModal();
-        }
-      }
-    });
   }
 
   function subscribeToAuth() {
     onAuthStateChanged(auth, async (user) => {
       currentUser = user || null;
-      const roleRecord = await resolveCurrentRole(user);
-      applyRoleRecord(roleRecord);
-      if (isAdmin()) {
-        await ensureScheduleInitialized();
+
+      let roleRecord = null;
+      if (user) {
+        try {
+          roleRecord = await resolveCurrentRole(user);
+        } catch (error) {
+          console.error('Ошибка определения роли:', error);
+        }
       }
+
+      applyRoleRecord(roleRecord);
       updateAuthUI();
+
+      try {
+        if (isAdmin()) {
+          await ensureScheduleInitialized();
+        }
+      } catch (error) {
+        console.error('Ошибка инициализации после входа:', error);
+      }
+
+      renderFilters();
+      renderBoard();
     });
   }
 
   function attachStaticHandlers() {
+    els.branchFilter.onchange = () => {
+      renderFilters();
+      renderBoard();
+    };
+    els.groupFilter.onchange = renderBoard;
+    els.searchInput.oninput = renderBoard;
+    els.expandAllMonthsBtn.onclick = expandAllMonths;
+
     els.addBtn.onclick = () => openVacationModal();
     els.resetBtn.onclick = resetAllVacations;
     els.addEmployeeToolbarBtn.onclick = openEmployeeModal;
@@ -1843,88 +1814,40 @@ import {
 
     els.closeEmployeeModalBtn.onclick = closeEmployeeModal;
     els.saveEmployeeBtn.onclick = addEmployee;
-    els.suggestDepartmentBtn.onclick = () => openDepartmentRequestModal(els.employeeDepartmentSearch.value || els.newEmployeeName.value);
+    els.employeeDepartmentSearch.oninput = renderEmployeeDepartmentOptions;
+    els.suggestDepartmentBtn.onclick = openDepartmentRequestModal;
 
     els.closeRemoveEmployeeModalBtn.onclick = closeRemoveEmployeeModal;
-    els.confirmRemoveEmployeeBtn.onclick = removeEmployeeByModal;
+    els.confirmRemoveEmployeeBtn.onclick = removeEmployee;
     els.removeEmployeeGroupSelect.onchange = refreshRemoveEmployeeSelect;
 
     els.loginBtn.onclick = openAuthModal;
     els.logoutBtn.onclick = logoutUser;
+    els.closeAuthModalBtn.onclick = closeAuthModal;
     els.submitLoginBtn.onclick = signIn;
     els.submitRegisterBtn.onclick = registerAccount;
-    els.closeAuthModalBtn.onclick = closeAuthModal;
 
     els.closeDepartmentRequestModalBtn.onclick = closeDepartmentRequestModal;
-    els.saveDepartmentRequestBtn.onclick = createDepartmentRequest;
+    els.saveDepartmentRequestBtn.onclick = saveDepartmentRequest;
 
     els.closeDepartmentAdminModalBtn.onclick = closeDepartmentAdminModal;
-    els.addDepartmentDirectBtn.onclick = addDepartmentDirect;
+    els.addDepartmentDirectBtn.onclick = createDepartmentDirect;
+    els.adminDepartmentBranchSelect.onchange = renderDepartmentAdminModal;
 
     els.closeAccessAdminModalBtn.onclick = closeAccessAdminModal;
-    els.accessInviteSaveBtn.onclick = async () => {
-      const editKey = els.accessInviteSaveBtn.dataset.editKey || null;
-      await saveManagerInvite(editKey);
-      els.accessInviteSaveBtn.dataset.editKey = '';
-    };
+    els.accessInviteSaveBtn.onclick = saveInvite;
 
-    els.groupFilter.onchange = renderBoard;
-    els.searchInput.oninput = renderBoard;
-    els.expandAllMonthsBtn.onclick = expandAllMonths;
-    els.employeeDepartmentSearch.oninput = () => renderEmployeeDepartmentOptions();
+    els.modalBackdrop.addEventListener('click', e => { if (e.target === els.modalBackdrop) closeVacationModal(); });
+    els.employeeModalBackdrop.addEventListener('click', e => { if (e.target === els.employeeModalBackdrop) closeEmployeeModal(); });
+    els.removeEmployeeModalBackdrop.addEventListener('click', e => { if (e.target === els.removeEmployeeModalBackdrop) closeRemoveEmployeeModal(); });
+    els.authModalBackdrop.addEventListener('click', e => { if (e.target === els.authModalBackdrop) closeAuthModal(); });
+    els.departmentRequestModalBackdrop.addEventListener('click', e => { if (e.target === els.departmentRequestModalBackdrop) closeDepartmentRequestModal(); });
+    els.departmentAdminModalBackdrop.addEventListener('click', e => { if (e.target === els.departmentAdminModalBackdrop) closeDepartmentAdminModal(); });
+    els.accessAdminModalBackdrop.addEventListener('click', e => { if (e.target === els.accessAdminModalBackdrop) closeAccessAdminModal(); });
 
-    els.departmentList.addEventListener('click', async (event) => {
-      const action = event.target.dataset.action;
-      const departmentId = event.target.dataset.departmentId;
-      if (!action || !departmentId) return;
-
-      if (action === 'rename-department') await renameDepartment(departmentId);
-      if (action === 'toggle-department') await toggleDepartmentStatus(departmentId);
-    });
-
-    els.departmentRequestsList.addEventListener('click', async (event) => {
-      const action = event.target.dataset.action;
-      const requestId = event.target.dataset.requestId;
-      if (!action || !requestId) return;
-
-      if (action === 'approve-request') await approveDepartmentRequestAsNew(requestId);
-      if (action === 'reject-request') await rejectDepartmentRequest(requestId);
-      if (action === 'link-request') {
-        const select = els.departmentRequestsList.querySelector(`[data-request-link-select="${requestId}"]`);
-        await linkDepartmentRequest(requestId, select?.value || '');
-      }
-    });
-
-    els.accessInviteList.addEventListener('click', async (event) => {
-      const action = event.target.dataset.action;
-      if (!action) return;
-      if (action === 'edit-invite') await startEditingInvite(event.target.dataset.emailKey);
-      if (action === 'revoke-invite') await revokeInvite(event.target.dataset.emailKey);
-    });
-
-    els.accessRoleList.addEventListener('click', async (event) => {
-      const action = event.target.dataset.action;
-      if (action === 'revoke-role') await revokeManagerRole(event.target.dataset.uid);
-    });
-
-    [
-      els.modalBackdrop,
-      els.employeeModalBackdrop,
-      els.removeEmployeeModalBackdrop,
-      els.authModalBackdrop,
-      els.departmentRequestModalBackdrop,
-      els.departmentAdminModalBackdrop,
-      els.accessAdminModalBackdrop
-    ].forEach(backdrop => {
-      backdrop.addEventListener('click', e => {
-        if (e.target !== backdrop) return;
-        if (backdrop === els.modalBackdrop) closeVacationModal();
-        if (backdrop === els.employeeModalBackdrop) closeEmployeeModal();
-        if (backdrop === els.removeEmployeeModalBackdrop) closeRemoveEmployeeModal();
-        if (backdrop === els.authModalBackdrop) closeAuthModal();
-        if (backdrop === els.departmentRequestModalBackdrop) closeDepartmentRequestModal();
-        if (backdrop === els.departmentAdminModalBackdrop) closeDepartmentAdminModal();
-        if (backdrop === els.accessAdminModalBackdrop) closeAccessAdminModal();
+    [els.authEmail, els.authPassword].forEach(input => {
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') signIn();
       });
     });
 
@@ -1938,13 +1861,6 @@ import {
       closeDepartmentAdminModal();
       closeAccessAdminModal();
     });
-
-    els.authEmail.addEventListener('keydown', e => {
-      if (e.key === 'Enter') signIn();
-    });
-    els.authPassword.addEventListener('keydown', e => {
-      if (e.key === 'Enter') signIn();
-    });
   }
 
   async function init() {
@@ -1952,13 +1868,10 @@ import {
     createMonthsHeader();
     renderFilters();
     renderBoard();
+    updateAuthUI();
     attachStaticHandlers();
     subscribeToCloudUpdates();
     subscribeToAuth();
-
-    if (initialSource !== 'v2') {
-      els.status.textContent = `${els.status.textContent} · Обновленная структура данных будет сохранена после входа администратора`;
-    }
   }
 
   init();
