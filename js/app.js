@@ -18,7 +18,7 @@ import {
 
 (() => {
   const YEAR = 2026;
-  const APP_VERSION = 5;
+  const APP_VERSION = 6;
   const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const PX_PER_DAY = 18;
@@ -63,6 +63,9 @@ import {
   const legacyStateRef = ref(db, 'schedule/main');
   const rolesRootRef = ref(db, 'roles');
   const invitesRootRef = ref(db, 'roleInvites');
+  const profilesRootRef = ref(db, 'userProfiles');
+  const employeeInvitesRootRef = ref(db, 'employeeInvites');
+  const employeeAccessRootRef = ref(db, 'employeeAccess');
 
   const $ = (id) => document.getElementById(id);
 
@@ -87,6 +90,10 @@ import {
     logoutBtn: $('logoutBtn'),
     manageDepartmentsBtn: $('manageDepartmentsBtn'),
     manageAccessBtn: $('manageAccessBtn'),
+    myEmployeesBtn: $('myEmployeesBtn'),
+    importCsvBtn: $('importCsvBtn'),
+    exportCsvBtn: $('exportCsvBtn'),
+    exportExcelBtn: $('exportExcelBtn'),
 
     addBtn: $('addBtn'),
     resetBtn: $('resetBtn'),
@@ -158,23 +165,43 @@ import {
     closeAccessAdminModalBtn: $('closeAccessAdminModalBtn'),
 
     accessRequestModalBackdrop: $('accessRequestModalBackdrop'),
-    accessRequestEmail: $('accessRequestEmail'),
-    accessRequestName: $('accessRequestName'),
+    accessRequestEmailView: $('accessRequestEmailView'),
+    accessRequestNameView: $('accessRequestNameView'),
     accessRequestDepartments: $('accessRequestDepartments'),
     accessRequestComment: $('accessRequestComment'),
     accessRequestError: $('accessRequestError'),
     closeAccessRequestModalBtn: $('closeAccessRequestModalBtn'),
-    saveAccessRequestBtn: $('saveAccessRequestBtn')
+    saveAccessRequestBtn: $('saveAccessRequestBtn'),
+
+    myEmployeesModalBackdrop: $('myEmployeesModalBackdrop'),
+    myEmployeesList: $('myEmployeesList'),
+    closeMyEmployeesModalBtn: $('closeMyEmployeesModalBtn'),
+
+    helpBtn: $('helpBtn'),
+    helpModalBackdrop: $('helpModalBackdrop'),
+    closeHelpModalBtn: $('closeHelpModalBtn'),
+
+    importModalBackdrop: $('importModalBackdrop'),
+    importFileInput: $('importFileInput'),
+    importError: $('importError'),
+    closeImportModalBtn: $('closeImportModalBtn'),
+    submitImportBtn: $('submitImportBtn'),
+    importTemplateBtn: $('importTemplateBtn'),
+
+    toastContainer: $('toastContainer')
   };
 
   let state = buildEmptyState();
   let collapsedMonths = loadCollapsedMonths();
   let currentUser = null;
+  let currentUserProfile = null;
   let currentRoleRecord = null;
   let pendingRegistrationFullName = '';
 
   let currentRole = 'viewer';
   let currentDepartmentIds = new Set();
+  let currentEmployeeId = null;
+  let currentEmployeePermission = 'view';
   let adminAccessSnapshot = { roles: {}, roleInvites: {}, accessRequests: {} };
   let initialLoadDone = false;
 
@@ -224,7 +251,7 @@ import {
   function isLikelyFullName(name) {
     const normalized = normalizeFullName(name);
     if (!normalized) return false;
-    return normalized.split(' ').length >= 2;
+    return normalized.split(' ').length >= 3;
   }
 
   function formatEmployeePosition(position) {
@@ -283,7 +310,78 @@ import {
   function roleLabel(role) {
     if (role === 'admin') return 'Администратор';
     if (role === 'manager') return 'Руководитель';
+    if (role === 'employee') return 'Сотрудник';
     return 'Гость';
+  }
+
+
+  function showToast(message, type = 'success') {
+    if (!els.toastContainer) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    els.toastContainer.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('visible'));
+    setTimeout(() => {
+      toast.classList.remove('visible');
+      setTimeout(() => toast.remove(), 220);
+    }, 2600);
+  }
+
+  function csvEscape(value) {
+    const str = String(value ?? '');
+    if (/[",;\n]/.test(str)) return `"${str.replaceAll('"', '""')}"`;
+    return str;
+  }
+
+  function downloadBlob(content, filename, mimeType) {
+    const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function parseCsvText(text) {
+    const delimiter = (text.match(/;/g) || []).length > (text.match(/,/g) || []).length ? ';' : ',';
+    const rows = [];
+    let row = [];
+    let value = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const next = text[i + 1];
+      if (char === '"') {
+        if (inQuotes && next === '"') {
+          value += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === delimiter && !inQuotes) {
+        row.push(value);
+        value = '';
+      } else if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r' && next === '\n') i += 1;
+        row.push(value);
+        if (row.some(cell => String(cell).trim() !== '')) rows.push(row);
+        row = [];
+        value = '';
+      } else {
+        value += char;
+      }
+    }
+    if (value || row.length) {
+      row.push(value);
+      if (row.some(cell => String(cell).trim() !== '')) rows.push(row);
+    }
+    if (rows.length === 0) return [];
+    const headers = rows[0].map(cell => normalizeText(cell).replace(/\s+/g, '_'));
+    return rows.slice(1).map(cols => Object.fromEntries(headers.map((header, idx) => [header, String(cols[idx] || '').trim()])));
   }
 
   function loadCollapsedMonths() {
@@ -512,6 +610,10 @@ import {
     return currentRole === 'manager';
   }
 
+  function isEmployeeRole() {
+    return currentRole === 'employee';
+  }
+
   function canManageDepartment(departmentId) {
     if (isAdmin()) return true;
     return isManager() && currentDepartmentIds.has(departmentId);
@@ -519,6 +621,10 @@ import {
 
   function canEditAnything() {
     return isAdmin() || isManager();
+  }
+
+  function canCreateVacation() {
+    return canEditAnything() || (isEmployeeRole() && currentEmployeePermission === 'edit' && !!currentEmployeeId);
   }
 
   function canResetAll() {
@@ -533,9 +639,18 @@ import {
     return isAdmin();
   }
 
+  function canOpenMyEmployees() {
+    return isAdmin() || isManager();
+  }
+
+  function canRequestManagerAccess() {
+    return !!currentUser && currentRole === 'viewer';
+  }
+
   function canManageVacation(vacation) {
     if (!vacation) return false;
-    return canManageDepartment(vacation.departmentId);
+    if (canManageDepartment(vacation.departmentId)) return true;
+    return isEmployeeRole() && currentEmployeePermission === 'edit' && vacation.employeeId === currentEmployeeId;
   }
 
   function canManageEmployee(employee) {
@@ -581,6 +696,12 @@ import {
 
     const date = new Date(`${YEAR}-01-01T00:00:00`);
     date.setDate(date.getDate() + day);
+    return offsetForDate(date.toISOString().slice(0, 10));
+  }
+
+  function offsetForDayIndex(dayIndexValue) {
+    const date = new Date(`${YEAR}-01-01T00:00:00`);
+    date.setDate(date.getDate() + dayIndexValue);
     return offsetForDate(date.toISOString().slice(0, 10));
   }
 
@@ -760,6 +881,82 @@ import {
     }
   }
 
+  async function loadCurrentUserProfile(uid) {
+    try {
+      const snapshot = await get(ref(db, `userProfiles/${uid}`));
+      return snapshot.exists() ? snapshot.val() : null;
+    } catch (error) {
+      console.error('Ошибка загрузки профиля:', error);
+      return null;
+    }
+  }
+
+  async function ensureUserProfile(user, preferredFullName = '') {
+    if (!user?.uid) return null;
+    const existing = await loadCurrentUserProfile(user.uid);
+    const fullName = normalizeFullName(preferredFullName || existing?.fullName || currentRoleRecord?.fullName || '');
+    const payload = {
+      ...(existing || {}),
+      uid: user.uid,
+      email: normalizeEmail(user.email || existing?.email || ''),
+      fullName,
+      updatedAt: nowTs(),
+      lastLoginAt: nowTs(),
+      createdAt: existing?.createdAt || nowTs()
+    };
+    try {
+      await set(ref(db, `userProfiles/${user.uid}`), payload);
+      currentUserProfile = payload;
+      return payload;
+    } catch (error) {
+      console.error('Ошибка сохранения профиля:', error);
+      currentUserProfile = payload;
+      return payload;
+    }
+  }
+
+  async function findUserProfileByEmail(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    try {
+      const snapshot = await get(profilesRootRef);
+      if (!snapshot.exists()) return null;
+      const profiles = snapshot.val() || {};
+      return Object.values(profiles).find(profile => normalizeEmail(profile?.email) === normalized) || null;
+    } catch (error) {
+      console.error('Ошибка поиска профиля по email:', error);
+      return null;
+    }
+  }
+
+  async function tryApplyEmployeeInvite(user) {
+    if (!user?.email) return false;
+    const key = emailKey(user.email);
+    try {
+      const inviteSnapshot = await get(ref(db, `employeeInvites/${key}`));
+      if (!inviteSnapshot.exists()) return false;
+      const invite = inviteSnapshot.val();
+      if (!invite || invite.isActive === false || !invite.employeeId) return false;
+
+      await set(ref(db, `roles/${user.uid}`), {
+        role: 'employee',
+        email: normalizeEmail(user.email),
+        fullName: currentUserProfile?.fullName || pendingRegistrationFullName || '',
+        employeeId: invite.employeeId,
+        departmentIds: invite.departmentId ? { [invite.departmentId]: true } : {},
+        permission: invite.permission || 'view',
+        inviteKey: key,
+        grantedAt: nowTs(),
+        grantedBy: invite.grantedBy || invite.createdBy || 'manager',
+        source: 'employee_invite'
+      });
+      return true;
+    } catch (error) {
+      console.error('Ошибка применения прав сотрудника:', error);
+      return false;
+    }
+  }
+
   async function resolveCurrentRole(user) {
     if (!user) return null;
 
@@ -778,6 +975,12 @@ import {
       if (roleRecord) return roleRecord;
     }
 
+    const employeeInvited = await tryApplyEmployeeInvite(user);
+    if (employeeInvited) {
+      roleRecord = await loadMyRole(user.uid);
+      if (roleRecord) return roleRecord;
+    }
+
     return null;
   }
 
@@ -785,6 +988,8 @@ import {
     currentRoleRecord = roleRecord;
     currentRole = roleRecord?.role || 'viewer';
     currentDepartmentIds = new Set(Object.keys(roleRecord?.departmentIds || {}).filter(id => roleRecord.departmentIds[id] === true));
+    currentEmployeeId = roleRecord?.employeeId || null;
+    currentEmployeePermission = roleRecord?.permission || 'view';
   }
 
   function showTooltip(event, text) {
@@ -938,7 +1143,12 @@ import {
 
   function renderVacationEmployeeOptions() {
     const branchId = getCurrentBranchId();
-    const employees = getEmployees({ branchId }).filter(emp => canManageEmployee(emp));
+    let employees = [];
+    if (canEditAnything()) {
+      employees = getEmployees({ branchId }).filter(emp => canManageEmployee(emp));
+    } else if (isEmployeeRole() && currentEmployeeId && state.employees?.[currentEmployeeId]) {
+      employees = [state.employees[currentEmployeeId]];
+    }
     if (employees.length === 0) {
       els.employeeSelect.innerHTML = '<option value="">Нет доступных сотрудников</option>';
       return;
@@ -1168,19 +1378,23 @@ import {
       els.authStatus.textContent = 'Гость';
     }
 
-    els.requestAccessBtn.hidden = canEditAnything();
+    els.requestAccessBtn.hidden = !canRequestManagerAccess();
     els.loginBtn.hidden = !!currentUser;
     els.logoutBtn.hidden = !currentUser;
-    els.addBtn.hidden = !canEditAnything();
+    els.addBtn.hidden = !canCreateVacation();
     els.resetBtn.hidden = !canResetAll();
     els.addEmployeeToolbarBtn.hidden = !canEditAnything();
     els.removeEmployeeToolbarBtn.hidden = !canEditAnything();
     els.manageDepartmentsBtn.hidden = !canManageDepartments();
     els.manageAccessBtn.hidden = !canManageAccess();
+    els.myEmployeesBtn.hidden = !canOpenMyEmployees();
+    els.importCsvBtn.hidden = !canEditAnything();
+    els.exportCsvBtn.hidden = !canEditAnything();
+    els.exportExcelBtn.hidden = !canEditAnything();
   }
 
   function openVacationModal(vacation = null) {
-    if (!canEditAnything()) return;
+    if (!canCreateVacation()) return;
     renderVacationEmployeeOptions();
     els.modalBackdrop.classList.add('open');
 
@@ -1237,6 +1451,10 @@ import {
   function openAuthModal() {
     els.authError.textContent = '';
     els.authPassword.value = '';
+    if (!currentUser) {
+      els.authFullName.value = currentUserProfile?.fullName || '';
+      els.authEmail.value = currentUser?.email || '';
+    }
     els.authModalBackdrop.classList.add('open');
   }
 
@@ -1903,9 +2121,13 @@ import {
   }
 
   function openAccessRequestModal() {
+    if (!currentUser) {
+      openAuthModal();
+      return;
+    }
     els.accessRequestError.textContent = '';
-    els.accessRequestEmail.value = currentUser?.email || '';
-    els.accessRequestName.value = currentRoleRecord?.fullName || '';
+    els.accessRequestEmailView.textContent = currentUser?.email || 'Не указан';
+    els.accessRequestNameView.textContent = currentUserProfile?.fullName || currentRoleRecord?.fullName || 'Не указано';
     els.accessRequestComment.value = '';
     renderDepartmentCheckboxGroups(els.accessRequestDepartments);
     els.accessRequestModalBackdrop.classList.add('open');
@@ -1920,18 +2142,23 @@ import {
   }
 
   async function saveAccessRequest() {
-    const email = normalizeEmail(els.accessRequestEmail.value);
-    const name = normalizeFullName(els.accessRequestName.value);
+    if (!currentUser) {
+      openAuthModal();
+      return;
+    }
+
+    const email = normalizeEmail(currentUser?.email || currentUserProfile?.email || '');
+    const name = normalizeFullName(currentUserProfile?.fullName || currentRoleRecord?.fullName || '');
     const comment = els.accessRequestComment.value.trim();
     const departmentIds = getAccessRequestDepartmentValues();
 
     els.accessRequestError.textContent = '';
     if (!email) {
-      els.accessRequestError.textContent = 'Введите email';
+      els.accessRequestError.textContent = 'Не найден email текущего пользователя';
       return;
     }
     if (!isLikelyFullName(name)) {
-      els.accessRequestError.textContent = 'Укажите полное имя';
+      els.accessRequestError.textContent = 'В профиле не заполнено полное ФИО';
       return;
     }
     if (departmentIds.length === 0) {
@@ -1956,7 +2183,7 @@ import {
       if (!adminAccessSnapshot.accessRequests) adminAccessSnapshot.accessRequests = {};
       adminAccessSnapshot.accessRequests[requestId] = requestData;
       closeAccessRequestModal();
-      alert('Запрос отправлен администратору');
+      showToast('Запрос отправлен администратору');
     } catch (error) {
       console.error('Ошибка отправки запроса доступа:', error);
       els.accessRequestError.textContent = 'Не удалось отправить запрос';
