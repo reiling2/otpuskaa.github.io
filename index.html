@@ -10,13 +10,21 @@
   <div class="app-shell">
     <div class="toolbar">
       <div class="title">График отпусков 2026</div>
+
       <input id="searchInput" type="text" placeholder="Поиск по сотруднику">
       <select id="groupFilter"><option value="all">Все отделы</option></select>
       <button id="expandAllMonthsBtn" type="button">Развернуть все месяцы</button>
-      <button id="addBtn" type="button">Добавить отпуск</button>
-      <button id="resetBtn" type="button" class="danger-btn">Сбросить все</button>
-      <button id="addEmployeeToolbarBtn" type="button">Добавить сотрудника</button>
-      <button id="removeEmployeeToolbarBtn" type="button" class="danger-btn">Удалить сотрудника</button>
+
+      <button id="addBtn" type="button" hidden>Добавить отпуск</button>
+      <button id="resetBtn" type="button" class="danger-btn" hidden>Сбросить все</button>
+      <button id="addEmployeeToolbarBtn" type="button" hidden>Добавить сотрудника</button>
+      <button id="removeEmployeeToolbarBtn" type="button" class="danger-btn" hidden>Удалить сотрудника</button>
+      <button id="manageDepartmentsBtn" type="button" hidden>Управление отделами</button>
+      <button id="manageAccessBtn" type="button" hidden>Доступы</button>
+
+      <span id="authStatus" class="auth-status">Гость</span>
+      <button id="loginBtn" type="button">Войти</button>
+      <button id="logoutBtn" type="button" hidden>Выйти</button>
     </div>
 
     <div class="board-wrap" id="boardWrap">
@@ -42,27 +50,47 @@
       <div class="modal-header" id="modalTitle">Добавить отпуск</div>
       <div class="modal-body">
         <input type="hidden" id="vacationId">
+
         <div class="field">
           <label for="employeeSelect">Сотрудник</label>
           <select id="employeeSelect"></select>
         </div>
-        <div class="field">
-          <label for="startDate">Дата начала</label>
-          <input id="startDate" type="date">
+
+        <div class="field-grid two-cols">
+          <div class="field">
+            <label for="startDate">Дата начала</label>
+            <input id="startDate" type="date">
+          </div>
+
+          <div class="field">
+            <label for="endDate">Дата окончания</label>
+            <input id="endDate" type="date">
+          </div>
         </div>
-        <div class="field">
-          <label for="endDate">Дата окончания</label>
-          <input id="endDate" type="date">
+
+        <div class="field-grid two-cols">
+          <div class="field">
+            <label for="vacationColor">Цвет полоски</label>
+            <input id="vacationColor" type="color" value="#2d63dd">
+          </div>
+
+          <div class="field">
+            <label for="vacationStatus">Статус</label>
+            <select id="vacationStatus">
+              <option value="approved">Согласован</option>
+              <option value="pending">На согласовании</option>
+              <option value="rejected">Отклонен</option>
+              <option value="cancelled">Отменен</option>
+            </select>
+          </div>
         </div>
-        <div class="field">
-          <label for="vacationColor">Цвет полоски</label>
-          <input id="vacationColor" type="color" value="#2d63dd">
-        </div>
+
         <div class="field">
           <label for="comment">Комментарий</label>
           <input id="comment" type="text" placeholder="Основной отпуск / перенос / часть отпуска">
         </div>
       </div>
+
       <div class="modal-footer">
         <button id="closeModalBtn" type="button">Отмена</button>
         <div class="actions-right">
@@ -78,14 +106,25 @@
       <div class="modal-header">Добавить сотрудника</div>
       <div class="modal-body">
         <div class="field">
-          <label for="employeeGroupSelect">Отдел</label>
-          <select id="employeeGroupSelect"></select>
+          <label for="employeeDepartmentSearch">Поиск отдела</label>
+          <input id="employeeDepartmentSearch" type="text" placeholder="Начните вводить название отдела">
         </div>
+
+        <div class="field">
+          <label for="employeeDepartmentSelect">Выберите отдел</label>
+          <select id="employeeDepartmentSelect"></select>
+        </div>
+
+        <div class="field-actions-inline">
+          <button id="suggestDepartmentBtn" type="button" class="secondary-btn">Не нашли отдел? Предложить новый</button>
+        </div>
+
         <div class="field">
           <label for="newEmployeeName">ФИО сотрудника</label>
           <input id="newEmployeeName" type="text" placeholder="Например: Иванова Мария Сергеевна">
         </div>
       </div>
+
       <div class="modal-footer">
         <button id="closeEmployeeModalBtn" type="button">Отмена</button>
         <div class="actions-right">
@@ -103,16 +142,133 @@
           <label for="removeEmployeeGroupSelect">Отдел</label>
           <select id="removeEmployeeGroupSelect"></select>
         </div>
+
         <div class="field">
           <label for="removeEmployeeSelect">Сотрудник</label>
           <select id="removeEmployeeSelect"></select>
         </div>
       </div>
+
       <div class="modal-footer">
         <button id="closeRemoveEmployeeModalBtn" type="button">Отмена</button>
         <div class="actions-right">
           <button id="confirmRemoveEmployeeBtn" type="button" class="danger">Удалить</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="authModalBackdrop">
+    <div class="modal modal-narrow">
+      <div class="modal-header">Вход / регистрация</div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="authEmail">Email</label>
+          <input id="authEmail" type="email" placeholder="manager@company.ru">
+        </div>
+
+        <div class="field">
+          <label for="authPassword">Пароль</label>
+          <input id="authPassword" type="password" placeholder="Минимум 6 символов">
+        </div>
+
+        <div id="authError" class="form-error"></div>
+
+        <div class="auth-help">
+          Первый созданный аккаунт автоматически становится администратором. Остальным доступы выдает администратор по email.
+        </div>
+      </div>
+
+      <div class="modal-footer stacked-mobile">
+        <button id="closeAuthModalBtn" type="button">Отмена</button>
+        <div class="actions-right wide-on-mobile">
+          <button id="submitRegisterBtn" type="button" class="secondary-btn">Создать аккаунт</button>
+          <button id="submitLoginBtn" type="button">Войти</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="departmentRequestModalBackdrop">
+    <div class="modal modal-narrow">
+      <div class="modal-header">Предложить новый отдел</div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="departmentRequestName">Название отдела</label>
+          <input id="departmentRequestName" type="text" placeholder="Например: Служба эксплуатации СЗ">
+        </div>
+        <div id="departmentRequestError" class="form-error"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="closeDepartmentRequestModalBtn" type="button">Отмена</button>
+        <div class="actions-right">
+          <button id="saveDepartmentRequestBtn" type="button">Отправить заявку</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="departmentAdminModalBackdrop">
+    <div class="modal modal-xl">
+      <div class="modal-header">Управление отделами</div>
+      <div class="modal-body admin-modal-body">
+        <section class="admin-section">
+          <div class="section-title">Создать отдел вручную</div>
+          <div class="inline-form">
+            <input id="adminDepartmentName" type="text" placeholder="Название нового отдела">
+            <button id="addDepartmentDirectBtn" type="button">Создать</button>
+          </div>
+          <div id="adminDepartmentError" class="form-error"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="section-title">Существующие отделы</div>
+          <div id="departmentList" class="admin-list"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="section-title">Заявки на новые отделы</div>
+          <div id="departmentRequestsList" class="admin-list"></div>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <button id="closeDepartmentAdminModalBtn" type="button">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="accessAdminModalBackdrop">
+    <div class="modal modal-xl">
+      <div class="modal-header">Доступы руководителей</div>
+      <div class="modal-body admin-modal-body">
+        <section class="admin-section">
+          <div class="section-title">Выдать доступ по email</div>
+          <div class="field">
+            <label for="accessInviteEmail">Email сотрудника</label>
+            <input id="accessInviteEmail" type="email" placeholder="manager@company.ru">
+          </div>
+          <div class="field">
+            <label>Отделы, которыми можно управлять</label>
+            <div id="accessInviteDepartments" class="checkbox-grid"></div>
+          </div>
+          <div class="inline-form actions-start">
+            <button id="accessInviteSaveBtn" type="button">Сохранить доступ</button>
+          </div>
+          <div id="accessInviteError" class="form-error"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="section-title">Активные приглашения</div>
+          <div id="accessInviteList" class="admin-list"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="section-title">Уже назначенные роли</div>
+          <div id="accessRoleList" class="admin-list"></div>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <button id="closeAccessAdminModalBtn" type="button">Закрыть</button>
       </div>
     </div>
   </div>
