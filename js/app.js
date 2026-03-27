@@ -45,29 +45,8 @@ import {
   const invitesRootRef = ref(db, 'roleInvites');
 
   const LEGACY_DEFAULT_DATA = {
-    groups: [
-      { name: 'Сметно-договорное управление', employees: ['Козина Любовь Владимировна','Юрцева Анна Александровна','Егорова Анастасия Вадимовна','Никитина Виктория Викторовна','Шихтер Анна Викторовна','Цывунина Марина Ивановна','Лашина Юлия Сергеевна'] },
-      { name: 'Финансово-экономическое управление', employees: ['Протасова Оксана Юрьевна','Алейникова Елена Игоревна','Дмитриев Дмитрий Иванович','Медведева Екатерина Алексеевна','Терещенко Валентина Александровна','Храмова Наталья Яковлевна'] },
-      { name: 'Управление приемки выполненных работ', employees: ['Марчукюс Реворта Яковлевна','Лапшина Анна Сергеевна','Большакова Анна Владимировна','Сидорова Ольга Викторовна'] }
-    ],
-    vacations: [
-      { id: crypto.randomUUID(), employee: 'Козина Любовь Владимировна', start: '2026-01-05', end: '2026-01-27', color: '#f05a2a', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Юрцева Анна Александровна', start: '2026-01-20', end: '2026-02-16', color: '#4aa2ec', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Егорова Анастасия Вадимовна', start: '2026-02-18', end: '2026-03-02', color: '#59c663', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Никитина Виктория Викторовна', start: '2026-03-01', end: '2026-03-24', color: '#60d2cf', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Шихтер Анна Викторовна', start: '2026-03-15', end: '2026-05-02', color: '#ec4dc9', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Лашина Юлия Сергеевна', start: '2026-05-06', end: '2026-06-12', color: '#2d63dd', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Протасова Оксана Юрьевна', start: '2026-02-24', end: '2026-03-10', color: '#ff1d14', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Алейникова Елена Игоревна', start: '2026-03-11', end: '2026-05-01', color: '#8050f2', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Дмитриев Дмитрий Иванович', start: '2026-01-10', end: '2026-02-11', color: '#5ec56f', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Терещенко Валентина Александровна', start: '2026-02-06', end: '2026-03-03', color: '#ef47db', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Храмова Наталья Яковлевна', start: '2026-05-05', end: '2026-06-11', color: '#efd928', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Марчукюс Реворта Яковлевна', start: '2026-01-29', end: '2026-03-02', color: '#41595a', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Лапшина Анна Сергеевна', start: '2026-02-24', end: '2026-04-03', color: '#09a94c', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Большакова Анна Владимировна', start: '2026-01-07', end: '2026-01-19', color: '#eb4abf', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Большакова Анна Владимировна', start: '2026-04-03', end: '2026-04-15', color: '#eb4abf', comment: '' },
-      { id: crypto.randomUUID(), employee: 'Сидорова Ольга Викторовна', start: '2026-02-12', end: '2026-03-18', color: '#45ea06', comment: '' }
-    ]
+    groups: [],
+    vacations: []
   };
 
   const $ = (id) => document.getElementById(id);
@@ -463,12 +442,12 @@ import {
         }
       }
 
-      state = buildStateFromLegacy(LEGACY_DEFAULT_DATA);
-      initialSource = 'demo';
+      state = buildEmptyState();
+      initialSource = 'empty';
     } catch (error) {
       console.error('Ошибка загрузки данных:', error);
-      state = buildStateFromLegacy(LEGACY_DEFAULT_DATA);
-      initialSource = 'demo';
+      state = buildEmptyState();
+      initialSource = 'empty';
     }
   }
 
