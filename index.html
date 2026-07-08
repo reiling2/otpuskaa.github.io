@@ -1,365 +1,290 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>График отпусков 2026</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <title>Отпуск‑план</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <div class="toolbar">
-      <div class="toolbar-row toolbar-row-top">
-        <div class="title-block">
-          <div class="title">График отпусков 2026</div>
-          <div class="subtitle">Календарь отпусков по филиалам и отделам</div>
-          <div class="title-note">Фильтруйте по филиалу и отделу, управляйте отпусками без лишних таблиц</div>
+  <main class="app">
+    <header class="top">
+      <div class="brand">
+        <div class="logo">✦</div>
+        <div>
+          <div class="brand-title">Отпуск‑план</div>
+          <div id="profileLine" class="brand-sub">рабочий график команды</div>
         </div>
+      </div>
+      <div></div>
+      <div class="top-right">
+        <label class="field year top-year">
+          <select id="yearSelect"><option>2026</option><option>2027</option><option>2028</option></select>
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </label>
+        <button id="addDepartmentBtn" class="soft-btn" type="button">Добавить отдел</button>
+        <button id="addEmployeeBtn" class="soft-btn" type="button">Добавить сотрудника</button>
+        <div class="menu">
+          <button id="moreBtn" class="soft-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="moreMenu">Ещё</button>
+          <div id="moreMenu" class="menu-pop" role="menu">
+            <button id="exportCsvBtn" class="menu-item" type="button" role="menuitem">Экспорт CSV</button>
+            <button id="printBtn" class="menu-item" type="button" role="menuitem">Сохранить PDF</button>
+            <button id="backupBtn" class="menu-item" type="button" role="menuitem">JSON-бэкап</button>
+            <button id="importBtn" class="menu-item" type="button" role="menuitem">Импорт JSON</button>
+            <button id="deleteDepartmentBtn" class="menu-item" type="button" role="menuitem">Удалить отдел</button>
+            <button id="restoreBtn" class="menu-item" type="button" role="menuitem">Сброс</button>
+          </div>
+        </div>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+      </div>
+    </header>
 
-        <div class="toolbar-auth-group">
-          <span id="authStatus" class="auth-status">Гость</span>
-          <button id="requestAccessBtn" type="button" class="secondary-btn">Я руководитель</button>
-          <button id="loginBtn" type="button">Войти</button>
-          <button id="logoutBtn" type="button" hidden>Выйти</button>
+    <section class="main">
+      <div class="head">
+        <div class="title">
+          <h1 id="title">График отпусков 2026</h1>
+          <p>Планирование отпусков, пересечений и загрузки команды на год вперёд.</p>
+        </div>
+        <div class="toolbar">
+          <label class="field">
+            <input id="searchInput" type="search" placeholder="Поиск сотрудника" autocomplete="off" />
+            <svg viewBox="0 0 24 24" fill="none"><path d="M10.8 18.1a7.3 7.3 0 1 0 0-14.6 7.3 7.3 0 0 0 0 14.6ZM16.2 16.2l4.3 4.3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+          </label>
+
+          <div id="multiDeptWrap" class="dept-picker hidden">
+            <button id="departmentPickerBtn" class="soft-btn dept-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="departmentPopover">
+              <span id="departmentPickerLabel">Отделы</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div id="departmentPopover" class="dept-popover">
+              <div>
+                <div class="dept-pop-title">Отделы для просмотра</div>
+                <div class="dept-pop-sub">Выберите один или несколько отделов. Руководитель показывается отдельной строкой сверху.</div>
+              </div>
+              <div id="departmentOptions" class="dept-options"></div>
+              <div class="dept-actions">
+                <button id="deptAllBtn" class="mini-btn" type="button">Выбрать все</button>
+                <button id="deptOwnBtn" class="mini-btn" type="button">Мои отделы</button>
+                <button id="deptApplyBtn" class="mini-btn primary-lite" type="button">Готово</button>
+              </div>
+            </div>
+          </div>
+
+          <button id="addVacationBtn" class="primary" type="button">Добавить отпуск</button>
         </div>
       </div>
 
-      <div class="toolbar-row toolbar-row-bottom">
-        <div class="toolbar-panel toolbar-panel-filters">
-          <div class="toolbar-panel-label">Навигация</div>
-          <div class="toolbar-panel-controls">
-            <select id="branchFilter"></select>
-            <select id="groupFilter"></select>
-            <input id="searchInput" type="search" placeholder="Поиск по сотруднику" autocomplete="off" autocorrect="off" spellcheck="false">
-          </div>
-        </div>
-
-        <div class="toolbar-panel toolbar-panel-actions">
-          <div class="toolbar-panel-label">Действия</div>
-          <div class="toolbar-panel-controls actions-wrap">
-            <button id="expandAllMonthsBtn" type="button">Развернуть все месяцы</button>
-            <button id="addBtn" type="button" hidden>Добавить отпуск</button>
-            <button id="addEmployeeToolbarBtn" type="button" hidden>Добавить сотрудника</button>
-            <button id="removeEmployeeToolbarBtn" type="button" class="danger-btn" hidden>Удалить сотрудника</button>
-            <button id="manageDepartmentsBtn" type="button" hidden>Управление отделами</button>
-            <button id="manageAccessBtn" type="button" hidden>Доступы</button>
-            <button id="resetBtn" type="button" class="danger-btn" hidden>Сбросить все</button>
-          </div>
-        </div>
+      <div class="filter-row">
+        <button class="chip active" data-filter="all" type="button"><span class="chip-dot"></span>Все</button>
+        <button class="chip" data-filter="planned" type="button"><span class="chip-dot"></span>Запланировано</button>
+        <button class="chip" data-filter="approved" type="button"><span class="chip-dot"></span>Утверждено</button>
+        <button class="chip" data-filter="past" type="button"><span class="chip-dot"></span>Прошло</button>
+        <button class="chip" data-filter="empty" type="button"><span class="chip-dot"></span>Без отпусков</button>
       </div>
+
+      <article class="timeline-card">
+        <div class="timeline-actions">
+          <div class="legend">
+            <span class="legend-item"><span class="dot planned"></span>Запланировано</span>
+            <span class="legend-item"><span class="dot approved"></span>Утверждено</span>
+            <span class="legend-item"><span class="dot past"></span>Прошло</span>
+            <span class="legend-item"><span class="dot extra"></span>Доп. отпуск</span>
+            <span class="legend-item"><span class="hatch"></span>Пересечение</span>
+          </div>
+          <div class="timeline-tools">
+            <div class="zoom">
+              <button id="zoomOutBtn" type="button">−</button>
+              <input id="zoomSlider" type="range" min="180" max="420" step="10" />
+              <button id="zoomInBtn" type="button">+</button>
+              <span id="zoomValue" class="zoom-value">100%</span>
+            </div>
+            <button id="todayBtn" class="today" type="button">Сегодня</button>
+            <button id="prevBtn" class="nav-btn" type="button" aria-label="Назад">‹</button>
+            <button id="nextBtn" class="nav-btn" type="button" aria-label="Вперёд">›</button>
+          </div>
+        </div>
+        <div id="scrollArea" class="timeline-scroll">
+          <div id="timelineTable" class="timeline-table"></div>
+        </div>
+        <footer class="footer">
+          <div class="footer-right">
+            <span class="footer-contact">По всем вопросам обращаться: <a href="mailto:alferovev@gsprom.ru">alferovev@gsprom.ru</a></span>
+          </div>
+        </footer>
+      </article>
+    </section>
+  </main>
+
+  <aside id="sidePanel" class="side-panel">
+    <div class="side-head">
+      <div>
+        <h2 id="sideTitle" class="side-title">Детали</h2>
+        <p id="sideSub" class="side-sub">Выберите отпуск.</p>
+      </div>
+      <button id="closeSideBtn" class="close" type="button" aria-label="Закрыть панель деталей">×</button>
     </div>
+    <div id="sideBody" class="side-body"></div>
+  </aside>
 
-    <div class="board-wrap" id="boardWrap">
-      <div class="board" id="board">
-        <div class="left-panel">
-          <div class="left-top"><div class="branch-kicker">Филиал</div><div class="branch-badge" id="branchBadge">Филиал Северо-запад</div></div>
+  <div id="tooltip" class="tooltip"></div>
+
+  <div id="vacationModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="vacationModalTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="vacationModalTitle" class="modal-title">Добавить отпуск</h2>
+          <p class="modal-sub">Период сразу появится на таймлайне.</p>
         </div>
-        <div class="timeline-header"><div class="months" id="months"></div></div>
-        <div class="groups-area">
-          <div class="names-col" id="namesCol"></div>
-          <div class="timeline-col" id="timelineCol">
-            <div class="timeline-grid" id="timelineGrid"></div>
-            <div id="timelineGroups"></div>
+        <button id="closeVacationModalBtn" class="close" type="button" aria-label="Закрыть окно отпуска">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="vacationForm" class="form">
+          <input type="hidden" id="vacationId" />
+          <div class="form-field">
+            <label for="vacationEmployee">Сотрудник</label>
+            <select id="vacationEmployee" required></select>
           </div>
-        </div>
-        <div class="status" id="statusBox"></div>
+          <div class="form-row">
+            <div class="form-field"><label for="vacationStart">Начало</label><input id="vacationStart" type="date" required /></div>
+            <div class="form-field"><label for="vacationEnd">Окончание</label><input id="vacationEnd" type="date" required /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label for="vacationStatus">Статус</label>
+              <select id="vacationStatus">
+                <option value="planned">Запланировано</option>
+                <option value="approved">Утверждено</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label for="vacationType">Тип отпуска</label>
+              <select id="vacationType">
+                <option value="main">Основной</option>
+                <option value="extra">Дополнительный</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-field"><label for="vacationNote">Комментарий</label><textarea id="vacationNote" placeholder="Например: поездка, перенос периода, важная причина"></textarea></div>
+          <div class="form-actions">
+            <button id="deleteVacationBtn" class="danger-lite" type="button">Удалить</button>
+            <div class="form-actions-right">
+              <button id="cancelVacationBtn" class="ghost" type="button">Отмена</button>
+              <button class="primary" type="submit">Сохранить</button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   </div>
 
-  <div class="tooltip" id="tooltip"></div>
-
-  <div class="modal-backdrop" id="modalBackdrop">
-    <div class="modal">
-      <div class="modal-header" id="modalTitle">Добавить отпуск</div>
+  <div id="employeeModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="employeeModalTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="employeeModalTitle" class="modal-title">Сотрудник</h2>
+          <p class="modal-sub">Добавление или редактирование сотрудника.</p>
+        </div>
+        <button id="closeEmployeeModalBtn" class="close" type="button" aria-label="Закрыть окно сотрудника">×</button>
+      </div>
       <div class="modal-body">
-        <input type="hidden" id="vacationId">
-
-        <div class="field">
-          <label for="employeeSelect">Сотрудник</label>
-          <select id="employeeSelect"></select>
-        </div>
-
-        <div class="field-grid two-cols">
-          <div class="field">
-            <label for="startDate">Дата начала</label>
-            <input id="startDate" type="date">
-          </div>
-          <div class="field">
-            <label for="endDate">Дата окончания</label>
-            <input id="endDate" type="date">
-          </div>
-        </div>
-
-        <input id="vacationColor" type="hidden" value="#2d63dd">
-
-        <div class="field-grid two-cols">
-          <div class="field field-static-note">
-            <label>Цвет отпуска</label>
-            <div class="static-field-note">Цвет подставляется автоматически из профиля сотрудника</div>
-          </div>
-          <div class="field">
-            <label for="vacationStatus">Статус</label>
-            <select id="vacationStatus">
-              <option value="approved">Согласован</option>
-              <option value="pending">На согласовании</option>
-              <option value="rejected">Отклонен</option>
-              <option value="cancelled">Отменен</option>
+        <form id="employeeForm" class="form">
+          <input type="hidden" id="employeeId" />
+          <div class="form-field"><label for="employeeName">Имя</label><input id="employeeName" type="text" placeholder="Например: Алина Кузнецова" required /></div>
+          <div class="form-field"><label for="employeeDept">Отдел</label><select id="employeeDept" required></select></div>
+          <div class="form-field">
+            <label for="employeeRole">Роль</label>
+            <select id="employeeRole" required>
+              <option value="staff">Сотрудник</option>
+              <option value="manager">Руководитель</option>
             </select>
           </div>
-        </div>
-
-        <div class="field">
-          <label for="comment">Комментарий</label>
-          <input id="comment" type="text" placeholder="Основной отпуск / перенос / часть отпуска">
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button id="closeModalBtn" type="button">Отмена</button>
-        <div class="actions-right">
-          <button id="deleteBtn" type="button" class="danger">Удалить</button>
-          <button id="saveBtn" type="button">Сохранить</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="employeeModalBackdrop">
-    <div class="modal">
-      <div class="modal-header">Добавить сотрудника</div>
-      <div class="modal-body">
-        <div class="field">
-          <label for="employeeDepartmentSearch">Поиск отдела</label>
-          <input id="employeeDepartmentSearch" type="text" placeholder="Начните вводить название отдела" autocomplete="off">
-        </div>
-
-        <div class="field">
-          <label for="employeeDepartmentSelect">Выберите отдел</label>
-          <select id="employeeDepartmentSelect"></select>
-        </div>
-
-        <div class="field-actions-inline">
-          <button id="suggestDepartmentBtn" type="button" class="secondary-btn">Не нашли отдел? Предложить новый</button>
-        </div>
-
-        <div class="field-grid two-cols">
-          <div class="field">
-            <label for="newEmployeeName">ФИО сотрудника</label>
-            <input id="newEmployeeName" type="text" placeholder="Например: Иванова Мария Сергеевна">
-          </div>
-          <div class="field">
-            <label for="newEmployeePosition">Должность</label>
-            <input id="newEmployeePosition" type="text" placeholder="Например: ведущий инженер">
-          </div>
-        </div>
-
-        <div class="field-grid two-cols">
-          <div class="field field-color">
-            <label for="newEmployeeColor">Цвет сотрудника</label>
-            <input id="newEmployeeColor" type="color" value="#2d63dd">
-          </div>
-          <div class="field field-static-note">
-            <label>Как это работает</label>
-            <div class="static-field-note">Точка справа от ФИО меняет закрепленный цвет. Все новые отпуска будут брать его автоматически.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button id="closeEmployeeModalBtn" type="button">Отмена</button>
-        <div class="actions-right">
-          <button id="saveEmployeeBtn" type="button">Добавить</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="removeEmployeeModalBackdrop">
-    <div class="modal">
-      <div class="modal-header">Удалить сотрудника</div>
-      <div class="modal-body">
-        <div class="field">
-          <label for="removeEmployeeGroupSelect">Отдел</label>
-          <select id="removeEmployeeGroupSelect"></select>
-        </div>
-
-        <div class="field">
-          <label for="removeEmployeeSelect">Сотрудник</label>
-          <select id="removeEmployeeSelect"></select>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button id="closeRemoveEmployeeModalBtn" type="button">Отмена</button>
-        <div class="actions-right">
-          <button id="confirmRemoveEmployeeBtn" type="button" class="danger">Удалить</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="authModalBackdrop">
-    <div class="modal modal-narrow">
-      <div class="modal-header">Вход / регистрация</div>
-      <div class="modal-body">
-        <div class="field-grid two-cols">
-          <div class="field">
-            <label for="authFullName">Полное имя</label>
-            <input id="authFullName" type="text" placeholder="Например: Иванов Иван Иванович" autocomplete="name">
-            <div class="field-helper">Укажите полное имя. Оно будет видно администратору и в заявках на доступ.</div>
-          </div>
-          <div class="field">
-            <label for="authEmail">Email</label>
-            <input id="authEmail" type="email" placeholder="manager@company.ru" autocomplete="username">
-          </div>
-        </div>
-        <div class="field">
-          <label for="authPassword">Пароль</label>
-          <input id="authPassword" type="password" placeholder="Минимум 6 символов" autocomplete="current-password">
-        </div>
-        <div id="authError" class="form-error"></div>
-        <div class="auth-help">Первый зарегистрированный аккаунт становится администратором. Остальным доступы выдает администратор по email или через одобрение запроса руководителя.</div>
-      </div>
-      <div class="modal-footer stacked-mobile">
-        <button id="closeAuthModalBtn" type="button">Отмена</button>
-        <div class="actions-right wide-on-mobile">
-          <button id="submitRegisterBtn" type="button" class="secondary-btn">Создать аккаунт</button>
-          <button id="submitLoginBtn" type="button">Войти</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="departmentRequestModalBackdrop">
-    <div class="modal modal-narrow">
-      <div class="modal-header">Предложить новый отдел</div>
-      <div class="modal-body">
-        <div class="field">
-          <label for="departmentRequestName">Название отдела</label>
-          <input id="departmentRequestName" type="text" placeholder="Например: Служба эксплуатации СЗ">
-        </div>
-        <div id="departmentRequestError" class="form-error"></div>
-      </div>
-      <div class="modal-footer">
-        <button id="closeDepartmentRequestModalBtn" type="button">Отмена</button>
-        <div class="actions-right">
-          <button id="saveDepartmentRequestBtn" type="button">Отправить заявку</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="departmentAdminModalBackdrop">
-    <div class="modal modal-xl">
-      <div class="modal-header">Управление отделами</div>
-      <div class="modal-body admin-modal-body">
-        <section class="admin-section">
-          <div class="section-title">Создать отдел в выбранном филиале</div>
-          <div class="inline-form two-cols-inline">
-            <select id="adminDepartmentBranchSelect"></select>
-            <input id="adminDepartmentName" type="text" placeholder="Название нового отдела">
-            <button id="addDepartmentDirectBtn" type="button">Создать</button>
-          </div>
-          <div id="adminDepartmentError" class="form-error"></div>
-        </section>
-
-        <section class="admin-section">
-          <div class="section-title">Отделы</div>
-          <div id="departmentList" class="admin-list"></div>
-        </section>
-
-        <section class="admin-section">
-          <div class="section-title">Заявки на новые отделы</div>
-          <div id="departmentRequestsList" class="admin-list"></div>
-        </section>
-      </div>
-      <div class="modal-footer">
-        <button id="closeDepartmentAdminModalBtn" type="button">Закрыть</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="accessAdminModalBackdrop">
-    <div class="modal modal-xl">
-      <div class="modal-header">Управление доступами</div>
-      <div class="modal-body admin-modal-body">
-        <section class="admin-section">
-          <div class="section-title">Выдать доступ руководителю</div>
-          <div class="field">
-            <label for="accessInviteEmail">Email</label>
-            <input id="accessInviteEmail" type="email" placeholder="manager@company.ru">
-          </div>
-          <div class="field">
-            <label>Отделы</label>
-            <div id="accessInviteDepartments" class="checkbox-list"></div>
-          </div>
-          <div id="accessInviteError" class="form-error"></div>
-          <div class="actions-right align-start">
-            <button id="accessInviteSaveBtn" type="button">Сохранить приглашение</button>
-          </div>
-        </section>
-
-        <section class="admin-section">
-          <div class="section-title">Запросы на доступ</div>
-          <div id="accessRequestList" class="admin-list"></div>
-        </section>
-
-        <section class="admin-section">
-          <div class="section-title">Приглашения</div>
-          <div id="accessInviteList" class="admin-list"></div>
-        </section>
-
-        <section class="admin-section">
-          <div class="section-title">Выданные роли</div>
-          <div id="accessRoleList" class="admin-list"></div>
-        </section>
-      </div>
-      <div class="modal-footer">
-        <button id="closeAccessAdminModalBtn" type="button">Закрыть</button>
-      </div>
-    </div>
-  </div>
-
-  <input id="employeeColorPicker" type="color" class="visually-hidden-color-input" aria-hidden="true">
-
-  <div class="modal-backdrop" id="accessRequestModalBackdrop">
-    <div class="modal modal-xl">
-      <div class="modal-header">Запросить доступ руководителя</div>
-      <div class="modal-body admin-modal-body">
-        <section class="admin-section">
-          <div class="field-grid two-cols">
-            <div class="field">
-              <label for="accessRequestEmail">Рабочий email</label>
-              <input id="accessRequestEmail" type="email" placeholder="manager@company.ru">
-            </div>
-            <div class="field">
-              <label for="accessRequestName">Полное имя</label>
-              <input id="accessRequestName" type="text" placeholder="Например: Иванов Иван Иванович">
+          <div class="form-field"><label for="employeePosition">Должность</label><input id="employeePosition" type="text" placeholder="Например: Специалист" required /></div>
+          <div class="form-field"><label for="employeeInitials">Инициалы</label><input id="employeeInitials" type="text" maxlength="3" placeholder="АК" required /></div>
+          <div class="form-actions">
+            <button id="deleteEmployeeBtn" class="danger-lite" type="button">Удалить</button>
+            <div class="form-actions-right">
+              <button id="cancelEmployeeBtn" class="ghost" type="button">Отмена</button>
+              <button class="primary" type="submit">Сохранить</button>
             </div>
           </div>
-          <div class="field">
-            <label>Какими отделами вы хотите управлять</label>
-            <div id="accessRequestDepartments" class="checkbox-list"></div>
-          </div>
-          <div class="field">
-            <label for="accessRequestComment">Комментарий</label>
-            <input id="accessRequestComment" type="text" placeholder="Например: руководитель сметно-договорного управления">
-          </div>
-          <div id="accessRequestError" class="form-error"></div>
-        </section>
-      </div>
-      <div class="modal-footer">
-        <button id="closeAccessRequestModalBtn" type="button">Отмена</button>
-        <div class="actions-right">
-          <button id="saveAccessRequestBtn" type="button">Отправить запрос</button>
-        </div>
+        </form>
       </div>
     </div>
   </div>
 
-  <div class="support-badge">По всем вопросам обращаться: <a href="mailto:alferovev@gsprom.ru">alferovev@gsprom.ru</a></div>
+  <div id="onboarding" class="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle" aria-hidden="true">
+    <div class="onboard-card">
+      <h2 id="onboardingTitle">Настроим график под вас</h2>
+      <p>Без логина и пароля. Представьтесь один раз — и мы сразу откроем график в нужном контексте.</p>
+      <form id="onboardingForm" class="form">
+        <div class="form-field">
+          <label for="onboardName">Ваше имя</label>
+          <input id="onboardName" type="text" placeholder="Например: Анна Фролова" required />
+        </div>
+        <div class="form-field">
+          <label>Как вы будете пользоваться графиком?</label>
+          <div class="role-grid">
+            <label class="role-card active">
+              <input type="radio" name="onboardRole" value="employee" checked />
+              <strong>Сотрудник</strong>
+              <span>Видит только свой отдел и планирует свой отпуск.</span>
+            </label>
+            <label class="role-card">
+              <input type="radio" name="onboardRole" value="manager" />
+              <strong>Руководитель</strong>
+              <span>Выбирает несколько отделов и отображается сверху отдельной строкой.</span>
+            </label>
+          </div>
+          <div id="managerDepts" class="manager-depts">
+            <div class="manager-depts-head">
+              <div>
+                <div class="manager-depts-title">Какие отделы вы курируете?</div>
+                <div class="manager-depts-sub">Выберите один или несколько отделов. Этот выбор можно изменить на сайте.</div>
+              </div>
+              <div class="manager-depts-actions">
+                <button id="managerPickAllBtn" class="mini-btn tiny" type="button">Все</button>
+                <button id="managerClearBtn" class="mini-btn tiny" type="button">Очистить</button>
+              </div>
+            </div>
+            <div id="managerDeptChecks" class="dept-list"></div>
+          </div>
+        </div>
+        <div id="employeeDeptField" class="form-field">
+          <label for="onboardDept">Ваш отдел</label>
+          <select id="onboardDept" required></select>
+          <div id="deptCreateHint" class="dept-create-hint hidden">
+            <div>
+              <strong id="deptHintTitle">Новый отдел</strong>
+              <span id="deptCreateText">Отдел будет создан после подтверждения.</span>
+            </div>
+            <div id="similarDeptWrap" class="similar-wrap"></div>
+            <input id="newDeptName" type="text" placeholder="Название нового отдела" />
+            <label class="checkline"><input id="createDeptConfirm" type="checkbox" />Создать новый отдел</label>
+          </div>
+        </div>
+        <div id="existingEmployeeField" class="form-field hidden">
+          <label for="existingEmployeeSelect">Кто вы в списке сотрудников?</label>
+          <select id="existingEmployeeSelect"></select>
+          <div class="field-note">Если сотрудник уже добавлен заранее, выберите его карточку. Так человек не создастся второй раз.</div>
+        </div>
+        <div class="onboard-actions">
+          <button id="skipOnboardingBtn" class="ghost" type="button">Посмотреть всё</button>
+          <button class="primary" type="submit">Начать</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
-  <script type="module" src="js/app.js"></script>
+  <div id="toastWrap" class="toast-wrap"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+  <script src="js/firebase-config.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
+

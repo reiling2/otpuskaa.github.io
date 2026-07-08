@@ -1,2278 +1,1476 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
-import {
-  getDatabase,
-  ref,
-  get,
-  set,
-  update,
-  remove,
-  onValue
-} from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
-import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut
-} from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
+const RESET_CODE = "OTPUSK-RESET-2026";
+    const LOCAL_FALLBACK_KEY = "vacation-product-firestore-fallback";
+    const MS_DAY = 86400000;
+    const ANNUAL_ALLOWANCE = 28;
+    const MONTHS = ["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
+    const DEFAULT_YEARS = [2026, 2027, 2028];
+    const DEFAULT_DEPARTMENTS = [
+      "Сметно-договорное управление",
+      "Финансово-экономическое управление",
+      "Управление приемки выполненных работ"
+    ];
+    const DEFAULT_EMPLOYEES = [
+      { id:"e-sdu-manager", name:"Анна Фролова", dept:"Сметно-договорное управление", position:"Руководитель отдела", initials:"АФ", role:"manager" },
+      { id:"e-sdu-1", name:"Иван Петров", dept:"Сметно-договорное управление", position:"Ведущий специалист", initials:"ИП", role:"staff" },
+      { id:"e-sdu-2", name:"Мария Соколова", dept:"Сметно-договорное управление", position:"Специалист по договорам", initials:"МС", role:"staff" },
+      { id:"e-feu-manager", name:"Ольга Морозова", dept:"Финансово-экономическое управление", position:"Руководитель отдела", initials:"ОМ", role:"manager" },
+      { id:"e-feu-1", name:"Дмитрий Волков", dept:"Финансово-экономическое управление", position:"Экономист", initials:"ДВ", role:"staff" },
+      { id:"e-feu-2", name:"Елена Смирнова", dept:"Финансово-экономическое управление", position:"Финансовый аналитик", initials:"ЕС", role:"staff" },
+      { id:"e-upr-manager", name:"Павел Никитин", dept:"Управление приемки выполненных работ", position:"Руководитель отдела", initials:"ПН", role:"manager" },
+      { id:"e-upr-1", name:"Сергей Орлов", dept:"Управление приемки выполненных работ", position:"Инженер приемки", initials:"СО", role:"staff" },
+      { id:"e-upr-2", name:"Наталья Ким", dept:"Управление приемки выполненных работ", position:"Специалист приемки", initials:"НК", role:"staff" }
+    ];
+    const DEFAULT_VACATIONS = [
+      { id:"v-sdu-1", employeeId:"e-sdu-1", start:"2026-07-13", end:"2026-07-26", status:"approved", type:"main", note:"Летний отпуск" },
+      { id:"v-sdu-2", employeeId:"e-sdu-2", start:"2026-08-03", end:"2026-08-16", status:"planned", type:"main", note:"Плановый отпуск" },
+      { id:"v-feu-1", employeeId:"e-feu-1", start:"2026-09-07", end:"2026-09-20", status:"approved", type:"main", note:"Согласовано с руководителем" },
+      { id:"v-feu-2", employeeId:"e-feu-2", start:"2026-11-02", end:"2026-11-08", status:"planned", type:"extra", note:"Дополнительный отпуск" },
+      { id:"v-upr-1", employeeId:"e-upr-1", start:"2026-06-15", end:"2026-06-28", status:"approved", type:"main", note:"Основной отпуск" },
+      { id:"v-upr-2", employeeId:"e-upr-2", start:"2026-12-21", end:"2026-12-31", status:"planned", type:"main", note:"Конец года" }
+    ];
 
-(() => {
-  const YEAR = 2026;
-  const APP_VERSION = 5;
-  const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const MONTHS_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
-  const PX_PER_DAY = 18;
-  const COLLAPSED_MONTH_WIDTH = 40;
-  const COLLAPSED_MONTHS_STORAGE_KEY = `vacation_schedule_collapsed_months_${YEAR}`;
-  const NORTHWEST_BRANCH_ID = 'branch_northwest';
-  const CENTER_BRANCH_ID = 'branch_center';
-
-  const DEFAULT_BRANCHS = [
-    { id: NORTHWEST_BRANCH_ID, name: 'Филиал Северо-запад', order: 1, status: 'active' },
-    { id: CENTER_BRANCH_ID, name: 'ГСП-Центр', order: 2, status: 'active' }
-  ];
-
-  const CENTER_BRANCH_SEED_DEPARTMENTS = [
-    'Производственно-технический отдел',
-    'Отдел снабжения',
-    'Юридический отдел'
-  ];
-
-  const EMPLOYEE_COLOR_PALETTE = ['#2d63dd', '#f05a2a', '#4aa2ec', '#59c663', '#ec4dc9', '#8050f2', '#ff1d14', '#5ec56f', '#ef47db', '#efd928', '#41595a', '#09a94c'];
-
-  const LEGACY_DEFAULT_DATA = {
-    groups: [],
-    vacations: []
-  };
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyAxIvQmP9dh6pB1EeO9gJvaROlW64DytKc",
-    authDomain: "otpuska-55fa5.firebaseapp.com",
-    databaseURL: "https://otpuska-55fa5-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "otpuska-55fa5",
-    storageBucket: "otpuska-55fa5.firebasestorage.app",
-    messagingSenderId: "148454076507",
-    appId: "1:148454076507:web:46f7a6182a905e330d8f7e"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  const auth = getAuth(app);
-
-  const scheduleRef = ref(db, 'scheduleV2');
-  const legacyStateRef = ref(db, 'schedule/main');
-  const rolesRootRef = ref(db, 'roles');
-  const invitesRootRef = ref(db, 'roleInvites');
-
-  const $ = (id) => document.getElementById(id);
-
-  const els = {
-    board: $('board'),
-    branchBadge: $('branchBadge'),
-    months: $('months'),
-    namesCol: $('namesCol'),
-    timelineCol: $('timelineCol'),
-    timelineGrid: $('timelineGrid'),
-    timelineGroups: $('timelineGroups'),
-    tooltip: $('tooltip'),
-    status: $('statusBox'),
-    branchFilter: $('branchFilter'),
-    groupFilter: $('groupFilter'),
-    searchInput: $('searchInput'),
-    expandAllMonthsBtn: $('expandAllMonthsBtn'),
-
-    authStatus: $('authStatus'),
-    requestAccessBtn: $('requestAccessBtn'),
-    loginBtn: $('loginBtn'),
-    logoutBtn: $('logoutBtn'),
-    manageDepartmentsBtn: $('manageDepartmentsBtn'),
-    manageAccessBtn: $('manageAccessBtn'),
-
-    addBtn: $('addBtn'),
-    resetBtn: $('resetBtn'),
-    addEmployeeToolbarBtn: $('addEmployeeToolbarBtn'),
-    removeEmployeeToolbarBtn: $('removeEmployeeToolbarBtn'),
-
-    modalBackdrop: $('modalBackdrop'),
-    modalTitle: $('modalTitle'),
-    vacationId: $('vacationId'),
-    employeeSelect: $('employeeSelect'),
-    startDate: $('startDate'),
-    endDate: $('endDate'),
-    vacationColor: $('vacationColor'),
-    vacationStatus: $('vacationStatus'),
-    comment: $('comment'),
-    deleteBtn: $('deleteBtn'),
-    closeModalBtn: $('closeModalBtn'),
-    saveBtn: $('saveBtn'),
-
-    employeeModalBackdrop: $('employeeModalBackdrop'),
-    employeeDepartmentSearch: $('employeeDepartmentSearch'),
-    employeeDepartmentSelect: $('employeeDepartmentSelect'),
-    suggestDepartmentBtn: $('suggestDepartmentBtn'),
-    newEmployeeName: $('newEmployeeName'),
-    newEmployeePosition: $('newEmployeePosition'),
-    newEmployeeColor: $('newEmployeeColor'),
-    employeeColorPicker: $('employeeColorPicker'),
-    closeEmployeeModalBtn: $('closeEmployeeModalBtn'),
-    saveEmployeeBtn: $('saveEmployeeBtn'),
-
-    removeEmployeeModalBackdrop: $('removeEmployeeModalBackdrop'),
-    removeEmployeeGroupSelect: $('removeEmployeeGroupSelect'),
-    removeEmployeeSelect: $('removeEmployeeSelect'),
-    closeRemoveEmployeeModalBtn: $('closeRemoveEmployeeModalBtn'),
-    confirmRemoveEmployeeBtn: $('confirmRemoveEmployeeBtn'),
-
-    authModalBackdrop: $('authModalBackdrop'),
-    authFullName: $('authFullName'),
-    authEmail: $('authEmail'),
-    authPassword: $('authPassword'),
-    authError: $('authError'),
-    submitLoginBtn: $('submitLoginBtn'),
-    submitRegisterBtn: $('submitRegisterBtn'),
-    closeAuthModalBtn: $('closeAuthModalBtn'),
-
-    departmentRequestModalBackdrop: $('departmentRequestModalBackdrop'),
-    departmentRequestName: $('departmentRequestName'),
-    departmentRequestError: $('departmentRequestError'),
-    closeDepartmentRequestModalBtn: $('closeDepartmentRequestModalBtn'),
-    saveDepartmentRequestBtn: $('saveDepartmentRequestBtn'),
-
-    departmentAdminModalBackdrop: $('departmentAdminModalBackdrop'),
-    adminDepartmentBranchSelect: $('adminDepartmentBranchSelect'),
-    adminDepartmentName: $('adminDepartmentName'),
-    adminDepartmentError: $('adminDepartmentError'),
-    departmentList: $('departmentList'),
-    departmentRequestsList: $('departmentRequestsList'),
-    closeDepartmentAdminModalBtn: $('closeDepartmentAdminModalBtn'),
-    addDepartmentDirectBtn: $('addDepartmentDirectBtn'),
-
-    accessAdminModalBackdrop: $('accessAdminModalBackdrop'),
-    accessInviteEmail: $('accessInviteEmail'),
-    accessInviteDepartments: $('accessInviteDepartments'),
-    accessInviteError: $('accessInviteError'),
-    accessInviteSaveBtn: $('accessInviteSaveBtn'),
-    accessInviteList: $('accessInviteList'),
-    accessRequestList: $('accessRequestList'),
-    accessRoleList: $('accessRoleList'),
-    closeAccessAdminModalBtn: $('closeAccessAdminModalBtn'),
-
-    accessRequestModalBackdrop: $('accessRequestModalBackdrop'),
-    accessRequestEmail: $('accessRequestEmail'),
-    accessRequestName: $('accessRequestName'),
-    accessRequestDepartments: $('accessRequestDepartments'),
-    accessRequestComment: $('accessRequestComment'),
-    accessRequestError: $('accessRequestError'),
-    closeAccessRequestModalBtn: $('closeAccessRequestModalBtn'),
-    saveAccessRequestBtn: $('saveAccessRequestBtn')
-  };
-
-  let state = buildEmptyState();
-  let collapsedMonths = loadCollapsedMonths();
-  let currentUser = null;
-  let currentRoleRecord = null;
-  let pendingRegistrationFullName = '';
-
-  let currentRole = 'viewer';
-  let currentDepartmentIds = new Set();
-  let adminAccessSnapshot = { roles: {}, roleInvites: {}, accessRequests: {} };
-  let initialLoadDone = false;
-
-  function buildEmptyState() {
-    return {
-      meta: {
-        year: YEAR,
-        version: APP_VERSION,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+    const defaultState = {
+      year: 2026,
+      query: "",
+      filter: "all",
+      zoom: 300,
+      profile: null,
+      viewDepts: [],
+      departments: [...DEFAULT_DEPARTMENTS],
+      collapsed: {},
+      allowedConflicts: [],
+      employees: [...DEFAULT_EMPLOYEES],
+      managers: {
+        "Сметно-договорное управление": "e-sdu-manager",
+        "Финансово-экономическое управление": "e-feu-manager",
+        "Управление приемки выполненных работ": "e-upr-manager"
       },
-      branches: {},
-      departments: {},
-      employees: {},
-      vacations: {},
-      departmentRequests: {},
-      accessRequests: {}
-    };
-  }
-
-  function slugify(text) {
-    return String(text || '')
-      .toLowerCase()
-      .trim()
-      .replace(/ё/g, 'е')
-      .replace(/[^a-zа-я0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'item';
-  }
-
-  function normalizeText(text) {
-    return String(text || '')
-      .toLowerCase()
-      .trim()
-      .replace(/ё/g, 'е')
-      .replace(/\s+/g, ' ');
-  }
-
-  function normalizeEmail(email) {
-    return String(email || '').trim().toLowerCase();
-  }
-
-  function normalizeFullName(name) {
-    return String(name || '').trim().replace(/\s+/g, ' ');
-  }
-
-  function isLikelyFullName(name) {
-    const normalized = normalizeFullName(name);
-    if (!normalized) return false;
-    return normalized.split(' ').length >= 2;
-  }
-
-  function formatEmployeePosition(position) {
-    const normalized = String(position || '').trim();
-    return normalized ? ` (${normalized})` : '';
-  }
-
-  function employeeLabelWithPosition(employee) {
-    if (!employee) return 'Сотрудник';
-    return `${employee.displayName}${formatEmployeePosition(employee.position)}`;
-  }
-
-  function emailKey(email) {
-    return normalizeEmail(email).replace(/[^a-z0-9]+/g, '_');
-  }
-
-  function makeId(prefix, seed = '') {
-    return `${prefix}_${slugify(seed)}_${crypto.randomUUID().slice(0, 8)}`;
-  }
-
-  function nowTs() {
-    return Date.now();
-  }
-
-  function deepCopy(obj) {
-    return JSON.parse(JSON.stringify(obj));
-  }
-
-  function hashString(text) {
-    return Array.from(String(text || '')).reduce((acc, ch) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0);
-  }
-
-  function defaultEmployeeColor(seed) {
-    const hash = Math.abs(hashString(seed));
-    return EMPLOYEE_COLOR_PALETTE[hash % EMPLOYEE_COLOR_PALETTE.length];
-  }
-
-  function ensureEmployeeColors(targetState) {
-    Object.values(targetState.employees || {}).forEach(emp => {
-      if (!emp) return;
-      if (emp.color) return;
-      const firstVacation = Object.values(targetState.vacations || {}).find(vac => vac && vac.employeeId === emp.id && vac.color);
-      emp.color = firstVacation?.color || defaultEmployeeColor(`${emp.displayName}-${emp.departmentId}`);
-    });
-  }
-
-  function escapeHtml(text) {
-    return String(text)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
-  }
-
-  function roleLabel(role) {
-    if (role === 'admin') return 'Администратор';
-    if (role === 'manager') return 'Руководитель';
-    return 'Гость';
-  }
-
-  function loadCollapsedMonths() {
-    try {
-      const raw = localStorage.getItem(COLLAPSED_MONTHS_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.filter(Number.isInteger) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function saveCollapsedMonths() {
-    try {
-      localStorage.setItem(COLLAPSED_MONTHS_STORAGE_KEY, JSON.stringify(collapsedMonths));
-    } catch {}
-  }
-
-  function ensureSeedStructure(target) {
-    target.meta = {
-      year: YEAR,
-      version: APP_VERSION,
-      createdAt: target.meta?.createdAt || nowTs(),
-      updatedAt: nowTs()
+      vacations: [...DEFAULT_VACATIONS]
     };
 
-    target.branches = target.branches || {};
-    target.departments = target.departments || {};
-    target.employees = target.employees || {};
-    target.vacations = target.vacations || {};
-    target.departmentRequests = target.departmentRequests || {};
-    target.accessRequests = target.accessRequests || {};
+    const statusText = { approved:"Утверждено", planned:"Запланировано", past:"Прошло" };
+    const typeText = { main:"Основной", extra:"Дополнительный" };
+    let state = startWithEmptyTimeline(clone(defaultState));
+    let firebaseReady = false;
+    let applyingRemoteState = false;
+    let usingLocalFallback = false;
 
-    DEFAULT_BRANCHS.forEach(branch => {
-      if (!target.branches[branch.id]) {
-        target.branches[branch.id] = {
-          ...branch,
-          createdAt: nowTs()
-        };
-      }
-    });
+    const $ = id => document.getElementById(id);
+    const els = {
+      profileLine: $("profileLine"), title: $("title"), search: $("searchInput"), year: $("yearSelect"),
+      multiDeptWrap: $("multiDeptWrap"), departmentPickerBtn: $("departmentPickerBtn"), departmentPopover: $("departmentPopover"),
+      departmentOptions: $("departmentOptions"), departmentPickerLabel: $("departmentPickerLabel"),
+      zoomSlider: $("zoomSlider"), zoomValue: $("zoomValue"), scroll: $("scrollArea"), table: $("timelineTable"),
+      tooltip: $("tooltip"), toastWrap: $("toastWrap"),
+      vacationModal: $("vacationModal"), employeeModal: $("employeeModal"), onboarding: $("onboarding"),
+      vacationEmployee: $("vacationEmployee"), sidePanel: $("sidePanel"), sideTitle: $("sideTitle"), sideSub: $("sideSub"), sideBody: $("sideBody")
+    };
 
-    CENTER_BRANCH_SEED_DEPARTMENTS.forEach((name, index) => {
-      const existing = Object.values(target.departments).find(dep => dep && dep.branchId === CENTER_BRANCH_ID && normalizeText(dep.name) === normalizeText(name));
-      if (!existing) {
-        const id = `dep_center_${slugify(name)}`;
-        target.departments[id] = {
-          id,
-          name,
-          branchId: CENTER_BRANCH_ID,
-          status: 'active',
-          order: index + 1,
-          createdAt: nowTs()
-        };
-      }
-    });
-
-    return target;
-  }
-
-  function normalizeSchedulePayload(payload) {
-    const next = buildEmptyState();
-    if (!payload || typeof payload !== 'object') {
-      return ensureSeedStructure(next);
+    function clone(v){ return JSON.parse(JSON.stringify(v)); }
+    function normalizeStatus(v){ return v === 'approved' ? 'approved' : 'planned'; }
+    function isObject(v){ return !!v && typeof v === 'object' && !Array.isArray(v); }
+    function clampNumber(value, min, max, fallback){
+      const n = Number(value);
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
     }
+    function cleanText(value, fallback = ""){
+      return String(value ?? fallback).trim();
+    }
+    function safeId(value, prefix, used){
+      const raw = cleanText(value);
+      let id = /^[A-Za-z0-9_-]+$/.test(raw) ? raw : "";
+      if (!id || used.has(id)) id = uid(prefix);
+      while (used.has(id)) id = uid(prefix);
+      used.add(id);
+      return id;
+    }
+    function normalizeLoaded(data){
+      const base = clone(defaultState);
+      const source = isObject(data) ? data : {};
+      const out = clone(base);
+      const filters = new Set(["all", "planned", "approved", "past", "empty"]);
+      const usedEmployeeIds = new Set();
+      const usedVacationIds = new Set();
 
-    next.meta = deepCopy(payload.meta || next.meta);
-    next.branches = deepCopy(payload.branches || {});
-    next.departments = deepCopy(payload.departments || {});
-    next.employees = deepCopy(payload.employees || {});
-    next.vacations = deepCopy(payload.vacations || {});
-    next.departmentRequests = deepCopy(payload.departmentRequests || {});
-    next.accessRequests = deepCopy(payload.accessRequests || {});
+      out.year = Math.round(clampNumber(source.year, 1900, 2100, base.year));
+      out.query = cleanText(source.query);
+      out.filter = filters.has(source.filter) ? source.filter : base.filter;
+      out.zoom = Math.round(clampNumber(source.zoom, 180, 420, base.zoom));
 
-    Object.entries(next.branches).forEach(([id, branch]) => {
-      if (!branch) delete next.branches[id];
-      else next.branches[id] = { id, status: 'active', order: 999, ...branch };
-    });
+      out.employees = (Array.isArray(source.employees) ? source.employees : [])
+        .map(raw => {
+          if (!isObject(raw)) return null;
+          const name = cleanText(raw.name);
+          const dept = cleanText(raw.dept);
+          if (!name || !dept) return null;
+          const role = raw.role === 'manager' ? 'manager' : 'staff';
+          const id = safeId(raw.id, 'e', usedEmployeeIds);
+          const position = cleanText(raw.position, role === 'manager' ? 'Руководитель отдела' : 'Сотрудник');
+          const initials = cleanText(raw.initials, initialsFromName(name)).slice(0, 3).toUpperCase();
+          return { id, name, dept, position, initials: initials || initialsFromName(name), role };
+        })
+        .filter(Boolean);
 
-    Object.entries(next.departments).forEach(([id, dep]) => {
-      if (!dep) delete next.departments[id];
-      else next.departments[id] = { id, status: 'active', ...dep };
-    });
+      const hasStoredStructure = Array.isArray(source.departments) || Array.isArray(source.employees) || isObject(source.managers);
+      const departments = new Set(hasStoredStructure ? [] : base.departments);
+      out.employees.forEach(e => departments.add(e.dept));
+      if (Array.isArray(source.departments)) source.departments.map(cleanText).filter(Boolean).forEach(d => departments.add(d));
+      if (isObject(source.managers)) Object.keys(source.managers).map(cleanText).filter(Boolean).forEach(d => departments.add(d));
+      if (!hasStoredStructure) Object.keys(base.managers).forEach(d => departments.add(d));
+      out.departments = [...departments].sort((a,b)=>a.localeCompare(b,'ru'));
 
-    Object.entries(next.employees).forEach(([id, emp]) => {
-      if (!emp) delete next.employees[id];
-      else next.employees[id] = { id, isActive: true, ...emp };
-    });
-
-    Object.entries(next.vacations).forEach(([id, vac]) => {
-      if (!vac) delete next.vacations[id];
-      else next.vacations[id] = { id, status: 'approved', color: '#2d63dd', ...vac };
-    });
-
-    Object.entries(next.departmentRequests).forEach(([id, req]) => {
-      if (!req) delete next.departmentRequests[id];
-      else next.departmentRequests[id] = { id, status: 'pending', ...req };
-    });
-
-    Object.entries(next.accessRequests || {}).forEach(([id, req]) => {
-      if (!req) delete next.accessRequests[id];
-      else next.accessRequests[id] = { id, status: 'pending', requestedDepartmentIds: {}, ...req };
-    });
-
-    ensureEmployeeColors(next);
-    return ensureSeedStructure(next);
-  }
-
-
-  function hasRealScheduleContent(scheduleState) {
-    const employeeCount = Object.keys(scheduleState?.employees || {}).length;
-    const vacationCount = Object.keys(scheduleState?.vacations || {}).length;
-    const northwestDepartments = Object.values(scheduleState?.departments || {})
-      .filter(Boolean)
-      .filter(dep => dep.branchId === NORTHWEST_BRANCH_ID && dep.status !== 'archived').length;
-    return employeeCount > 0 || vacationCount > 0 || northwestDepartments > 0;
-  }
-
-  function migrateLegacyState(legacyState) {
-    const next = ensureSeedStructure(buildEmptyState());
-    const data = legacyState && Array.isArray(legacyState.groups) ? legacyState : LEGACY_DEFAULT_DATA;
-    const employeeMap = new Map();
-
-    (data.groups || []).forEach((group, groupIndex) => {
-      const departmentId = makeId('dep', group.name || `Отдел-${groupIndex + 1}`);
-      next.departments[departmentId] = {
-        id: departmentId,
-        name: group.name || `Отдел ${groupIndex + 1}`,
-        branchId: NORTHWEST_BRANCH_ID,
-        status: 'active',
-        order: groupIndex + 1,
-        createdAt: nowTs()
-      };
-
-      (group.employees || []).forEach((fullName, employeeIndex) => {
-        const employeeId = makeId('emp', `${group.name || 'dep'}-${fullName || employeeIndex}`);
-        next.employees[employeeId] = {
-          id: employeeId,
-          displayName: fullName,
-          departmentId,
-          isActive: true,
-          createdAt: nowTs()
-        };
-        if (!employeeMap.has(fullName)) {
-          employeeMap.set(fullName, employeeId);
+      const employeeIds = new Set(out.employees.map(e => e.id));
+      const rawManagers = isObject(source.managers) ? source.managers : {};
+      out.managers = {};
+      out.departments.forEach(dept => {
+        const managerId = cleanText(rawManagers[dept]);
+        out.managers[dept] = employeeIds.has(managerId) ? managerId : null;
+      });
+      if (!Object.keys(rawManagers).length) {
+        out.employees
+          .filter(e => e.role === 'manager' && out.departments.some(dept => normalized(dept) === normalized(e.dept)))
+          .forEach(e => { if (!out.managers[e.dept]) out.managers[e.dept] = e.id; });
+      }
+      Object.values(out.managers).filter(Boolean).forEach(id => {
+        const employee = out.employees.find(e => e.id === id);
+        if (employee) {
+          employee.role = 'manager';
+          employee.position = employee.position || 'Руководитель отдела';
         }
       });
-    });
 
-    (data.vacations || []).forEach((vacation, index) => {
-      const employeeId = employeeMap.get(vacation.employee);
-      if (!employeeId) return;
-      const employee = next.employees[employeeId];
-      const vacationId = vacation.id || makeId('vac', `${vacation.employee}-${index}`);
-      next.vacations[vacationId] = {
-        id: vacationId,
-        employeeId,
-        departmentId: employee.departmentId,
-        start: vacation.start,
-        end: vacation.end,
-        color: vacation.color || '#2d63dd',
-        status: vacation.status || 'approved',
-        comment: vacation.comment || '',
-        createdAt: nowTs(),
-        updatedAt: nowTs()
-      };
-    });
+      out.vacations = (Array.isArray(source.vacations) ? source.vacations : [])
+        .map(raw => {
+          if (!isObject(raw)) return null;
+          const employeeId = cleanText(raw.employeeId);
+          const start = cleanText(raw.start);
+          const end = cleanText(raw.end);
+          if (!employeeIds.has(employeeId) || !isValidDateISO(start) || !isValidDateISO(end) || parseDate(end) < parseDate(start)) return null;
+          return {
+            id: safeId(raw.id, 'v', usedVacationIds),
+            employeeId,
+            start,
+            end,
+            status: normalizeStatus(raw.status),
+            type: raw.type === 'extra' ? 'extra' : 'main',
+            note: cleanText(raw.note)
+          };
+        })
+        .filter(Boolean);
 
-    return ensureSeedStructure(next);
-  }
-
-  function getBranches() {
-    return Object.values(state.branches || {})
-      .filter(Boolean)
-      .filter(branch => branch.status !== 'archived')
-      .sort((a, b) => (a.order || 999) - (b.order || 999) || a.name.localeCompare(b.name, 'ru'));
-  }
-
-  function getCurrentBranchId() {
-    const branches = getBranches();
-    const current = els.branchFilter.value;
-    const availableIds = branches.map(branch => branch.id);
-    if (availableIds.includes(current)) return current;
-    return branches[0]?.id || NORTHWEST_BRANCH_ID;
-  }
-
-  function getCurrentBranchName() {
-    const branchId = getCurrentBranchId();
-    return state.branches?.[branchId]?.name || 'Филиал';
-  }
-
-  function getActiveDepartments(branchId = getCurrentBranchId()) {
-    return Object.values(state.departments || {})
-      .filter(Boolean)
-      .filter(dep => dep.status !== 'archived')
-      .filter(dep => dep.branchId === branchId)
-      .sort((a, b) => (a.order || 999) - (b.order || 999) || a.name.localeCompare(b.name, 'ru'));
-  }
-
-  function getDepartmentName(departmentId) {
-    return state.departments?.[departmentId]?.name || 'Без отдела';
-  }
-
-  function getEmployees({ branchId = null, departmentId = null, manageableOnly = false } = {}) {
-    return Object.values(state.employees || {})
-      .filter(Boolean)
-      .filter(emp => emp.isActive !== false)
-      .filter(emp => !departmentId || emp.departmentId === departmentId)
-      .filter(emp => !branchId || state.departments?.[emp.departmentId]?.branchId === branchId)
-      .filter(emp => !manageableOnly || canManageDepartment(emp.departmentId))
-      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ru'));
-  }
-
-  function getVacationsForEmployee(employeeId) {
-    return Object.values(state.vacations || {})
-      .filter(Boolean)
-      .filter(vac => vac.employeeId === employeeId)
-      .sort((a, b) => a.start.localeCompare(b.start));
-  }
-
-  function isAdmin() {
-    return currentRole === 'admin';
-  }
-
-  function isManager() {
-    return currentRole === 'manager';
-  }
-
-  function canManageDepartment(departmentId) {
-    if (isAdmin()) return true;
-    return isManager() && currentDepartmentIds.has(departmentId);
-  }
-
-  function canEditAnything() {
-    return isAdmin() || isManager();
-  }
-
-  function canResetAll() {
-    return isAdmin();
-  }
-
-  function canManageDepartments() {
-    return isAdmin();
-  }
-
-  function canManageAccess() {
-    return isAdmin();
-  }
-
-  function canManageVacation(vacation) {
-    if (!vacation) return false;
-    return canManageDepartment(vacation.departmentId);
-  }
-
-  function canManageEmployee(employee) {
-    if (!employee) return false;
-    return canManageDepartment(employee.departmentId);
-  }
-
-  function getDaysInYear() {
-    return 365;
-  }
-
-  function daysInMonth(monthIndex) {
-    return new Date(YEAR, monthIndex + 1, 0).getDate();
-  }
-
-  function isMonthCollapsed(monthIndex) {
-    return collapsedMonths.includes(monthIndex);
-  }
-
-  function getMonthWidth(monthIndex) {
-    return isMonthCollapsed(monthIndex) ? COLLAPSED_MONTH_WIDTH : daysInMonth(monthIndex) * PX_PER_DAY;
-  }
-
-  function getMonthOffset(monthIndex) {
-    let offset = 0;
-    for (let i = 0; i < monthIndex; i++) {
-      offset += getMonthWidth(i);
-    }
-    return offset;
-  }
-
-  function dayIndex(dateStr) {
-    const d = new Date(`${dateStr}T00:00:00`);
-    const start = new Date(`${YEAR}-01-01T00:00:00`);
-    return Math.floor((d - start) / 86400000);
-  }
-
-  function offsetForDayNumber(dayNumber) {
-    const day = Math.min(Math.max(dayNumber, 0), getDaysInYear());
-    if (day === getDaysInYear()) {
-      return MONTHS.reduce((sum, _, monthIndex) => sum + getMonthWidth(monthIndex), 0);
-    }
-
-    const date = new Date(`${YEAR}-01-01T00:00:00`);
-    date.setDate(date.getDate() + day);
-    return offsetForDate(date.toISOString().slice(0, 10));
-  }
-
-  function offsetForDate(dateStr) {
-    const d = new Date(`${dateStr}T00:00:00`);
-    const monthIndex = d.getMonth();
-    const day = d.getDate() - 1;
-    const baseOffset = getMonthOffset(monthIndex);
-    if (isMonthCollapsed(monthIndex)) return baseOffset;
-    return baseOffset + day * PX_PER_DAY;
-  }
-
-  function durationWidth(startStr, endStr) {
-    const start = new Date(`${startStr}T00:00:00`);
-    const end = new Date(`${endStr}T00:00:00`);
-    let width = 0;
-    const cursor = new Date(start);
-
-    while (cursor <= end) {
-      const monthIndex = cursor.getMonth();
-      if (isMonthCollapsed(monthIndex)) {
-        width += COLLAPSED_MONTH_WIDTH;
-        const nextMonth = new Date(cursor);
-        nextMonth.setMonth(monthIndex + 1, 1);
-        nextMonth.setHours(0, 0, 0, 0);
-        cursor.setTime(nextMonth.getTime());
-      } else {
-        width += PX_PER_DAY;
-        cursor.setDate(cursor.getDate() + 1);
+      out.collapsed = {};
+      if (isObject(source.collapsed)) {
+        out.departments.forEach(dept => { if (source.collapsed[dept]) out.collapsed[dept] = true; });
       }
-    }
 
-    return Math.max(width - 2, 8);
-  }
+      out.viewDepts = Array.isArray(source.viewDepts)
+        ? source.viewDepts.map(cleanText).filter(d => out.departments.some(item => normalized(item) === normalized(d)))
+        : [];
 
-  function compactName(full) {
-    const parts = String(full).trim().split(/\s+/);
-    if (parts.length < 3) return full;
-    return `${parts[0]} ${parts[1][0]}.${parts[2][0]}.`;
-  }
+      const vacationIds = new Set(out.vacations.map(v => v.id));
+      out.allowedConflicts = Array.isArray(source.allowedConflicts)
+        ? source.allowedConflicts
+          .map(cleanText)
+          .filter(key => {
+            const [a,b] = key.split('__');
+            return a && b && a !== b && vacationIds.has(a) && vacationIds.has(b);
+          })
+        : [];
 
-  function formatTooltip(vacation) {
-    const employee = state.employees?.[vacation.employeeId];
-    const start = new Date(`${vacation.start}T00:00:00`);
-    const end = new Date(`${vacation.end}T00:00:00`);
-    const title = compactName(employee?.displayName || 'Сотрудник');
-    const status = vacation.status && vacation.status !== 'approved' ? ` · ${vacationStatusLabel(vacation.status)}` : '';
-    const comment = vacation.comment ? ` · ${vacation.comment}` : '';
-    return `${title} ${MONTHS_SHORT[start.getMonth()]} ${start.getDate()}-${MONTHS_SHORT[end.getMonth()]} ${end.getDate()}${status}${comment}`;
-  }
-
-  function vacationStatusLabel(status) {
-    if (status === 'pending') return 'на согласовании';
-    if (status === 'rejected') return 'отклонен';
-    if (status === 'cancelled') return 'отменен';
-    return 'согласован';
-  }
-
-  async function loadStateFromCloud() {
-    try {
-      const [scheduleSnapshot, legacySnapshot] = await Promise.all([get(scheduleRef), get(legacyStateRef)]);
-      const hasLegacy = legacySnapshot.exists() && Array.isArray(legacySnapshot.val()?.groups) && legacySnapshot.val().groups.length > 0;
-
-      if (scheduleSnapshot.exists()) {
-        const normalized = normalizeSchedulePayload(scheduleSnapshot.val());
-        if (hasRealScheduleContent(normalized) || !hasLegacy) {
-          state = normalized;
-          initialLoadDone = true;
-          return;
+      out.profile = normalizeProfile(source.profile, out);
+      if (out.profile?.role === 'manager') {
+        const employee = out.employees.find(e => e.id === out.profile.employeeId);
+        if (employee) {
+          employee.role = 'manager';
+          employee.position = employee.position || 'Руководитель отдела';
         }
-        state = migrateLegacyState(legacySnapshot.val());
-        initialLoadDone = true;
-        return;
       }
-
-      if (hasLegacy) {
-        state = migrateLegacyState(legacySnapshot.val());
-        initialLoadDone = true;
-        return;
-      }
-
-      state = ensureSeedStructure(buildEmptyState());
-      initialLoadDone = true;
-    } catch (error) {
-      console.error('Ошибка загрузки данных:', error);
-      state = ensureSeedStructure(buildEmptyState());
-      initialLoadDone = true;
+      return out;
     }
-  }
-
-  async function ensureScheduleInitialized() {
-    if (!isAdmin()) return;
-    try {
-      const [snapshot, legacySnapshot] = await Promise.all([get(scheduleRef), get(legacyStateRef)]);
-      const hasLegacy = legacySnapshot.exists() && Array.isArray(legacySnapshot.val()?.groups) && legacySnapshot.val().groups.length > 0;
-
-      if (!snapshot.exists()) {
-        await set(scheduleRef, normalizeSchedulePayload(state));
-        return;
-      }
-
-      const normalized = normalizeSchedulePayload(snapshot.val());
-      if (!hasRealScheduleContent(normalized) && hasLegacy) {
-        const migrated = migrateLegacyState(legacySnapshot.val());
-        await set(scheduleRef, migrated);
-      }
-    } catch (error) {
-      console.error('Ошибка инициализации scheduleV2:', error);
+    function startWithEmptyTimeline(nextState){
+      nextState.viewDepts = [];
+      return nextState;
     }
-  }
-
-  function subscribeToCloudUpdates() {
-    onValue(scheduleRef, (snapshot) => {
-      if (!snapshot.exists()) return;
-      state = normalizeSchedulePayload(snapshot.val());
-      createMonthsHeader();
-      renderFilters();
-      renderBoard();
-      if (els.departmentAdminModalBackdrop.classList.contains('open')) {
-        renderDepartmentAdminModal();
+    function firebasePath(){
+      return window.vacationFirebase?.stateDocPath || 'apps/vacation-plan/state/main';
+    }
+    function loadStateFromLocalFallback(){
+      try {
+        if (typeof localStorage === 'undefined') return startWithEmptyTimeline(clone(defaultState));
+        const raw = localStorage.getItem(LOCAL_FALLBACK_KEY);
+        if (!raw) return startWithEmptyTimeline(clone(defaultState));
+        return startWithEmptyTimeline(normalizeLoaded(JSON.parse(raw)));
+      } catch (error) {
+        console.error('Не удалось загрузить локальный fallback', error);
+        return startWithEmptyTimeline(clone(defaultState));
       }
-      if (els.accessAdminModalBackdrop.classList.contains('open')) {
-        loadAdminAccessData().then(renderAccessAdminModal).catch(console.error);
+    }
+    function saveStateToLocalFallback(){
+      try {
+        if (typeof localStorage === 'undefined') return false;
+        localStorage.setItem(LOCAL_FALLBACK_KEY, JSON.stringify(state));
+        return true;
+      } catch (error) {
+        console.error('Не удалось сохранить локальный fallback', error);
+        if (typeof els !== 'undefined' && els.toastWrap) toast('Не удалось сохранить данные локально');
+        return false;
       }
-    });
-  }
+    }
+    async function signInToFirebase(){
+      const vf = window.vacationFirebase;
+      if (!vf?.isConfigured || !vf.firebaseAuth) throw new Error('Firebase не настроен');
+      if (vf.firebaseAuth.currentUser) return vf.firebaseAuth.currentUser;
+      const result = await vf.firebaseAuth.signInAnonymously();
+      return result.user;
+    }
+    async function loadStateFromFirebase(){
+      firebaseReady = false;
+      applyingRemoteState = true;
+      usingLocalFallback = false;
+      try {
+        const vf = window.vacationFirebase;
+        if (!vf?.isConfigured || !vf.stateDocRef) {
+          state = loadStateFromLocalFallback();
+          usingLocalFallback = true;
+          firebaseReady = true;
+          applyingRemoteState = false;
+          render();
+          maybeShowOnboarding();
+          if (!els.onboarding.classList.contains('open')) scrollToWorkWindow('auto');
+          toast('Firebase не настроен, используется локальное хранение');
+          return state;
+        }
 
-  async function loadMyRole(uid) {
-    try {
-      const snapshot = await get(ref(db, `roles/${uid}`));
-      return snapshot.exists() ? snapshot.val() : null;
-    } catch (error) {
-      console.error('Ошибка загрузки роли:', error);
+        await signInToFirebase();
+        const snapshot = await vf.stateDocRef.get();
+
+        if (snapshot.exists) {
+          state = startWithEmptyTimeline(normalizeLoaded(snapshot.data()));
+        } else {
+          state = startWithEmptyTimeline(clone(defaultState));
+          await vf.stateDocRef.set(clone(state));
+        }
+
+        cleanupAllowedConflicts();
+        firebaseReady = true;
+        applyingRemoteState = false;
+        render();
+        maybeShowOnboarding();
+        if (!els.onboarding.classList.contains('open')) scrollToWorkWindow('auto');
+        return state;
+      } catch (error) {
+        console.error(`Не удалось загрузить Firestore-документ ${firebasePath()}`, error);
+        toast('Не удалось загрузить данные из Firebase');
+        state = loadStateFromLocalFallback();
+        usingLocalFallback = true;
+        firebaseReady = true;
+        applyingRemoteState = false;
+        render();
+        maybeShowOnboarding();
+        if (!els.onboarding.classList.contains('open')) scrollToWorkWindow('auto');
+        return state;
+      }
+    }
+    async function loadState(){
+      return loadStateFromFirebase();
+    }
+    async function saveStateToFirebase(force = false){
+      const vf = window.vacationFirebase;
+      if (usingLocalFallback || !vf?.isConfigured || !vf.stateDocRef) return saveStateToLocalFallback();
+      if ((!firebaseReady && !force) || applyingRemoteState) return false;
+      try {
+        await signInToFirebase();
+        await vf.stateDocRef.set(clone(state));
+        return true;
+      } catch (error) {
+        console.error(`Не удалось сохранить Firestore-документ ${firebasePath()}`, error);
+        toast('Не удалось сохранить данные в Firebase');
+        return false;
+      }
+    }
+    function saveState(options = {}){
+      const force = options === true || Boolean(options.force);
+      return saveStateToFirebase(force);
+    }
+    let saveTimer = null;
+    function scheduleSave(){
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveState, 350);
+    }
+    function escapeHTML(v){ return String(v ?? '').replace(/[&<>"']/g, s => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[s])); }
+    function uid(p){ return p + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+    function toast(text){ const el = document.createElement('div'); el.className = 'toast'; el.textContent = text; els.toastWrap.appendChild(el); setTimeout(() => el.remove(), 2400); }
+    function normalized(v){ return String(v || '').trim().toLowerCase(); }
+    function normalizeProfile(profile, nextState){
+      if (!isObject(profile)) return null;
+      const employee = nextState.employees.find(e => e.id === cleanText(profile.employeeId));
+      const name = employee?.name || cleanText(profile.name);
+      if (!name) return null;
+      const role = profile.role === 'manager' ? 'manager' : 'employee';
+      const departments = nextState.departments || [];
+      const depts = Array.isArray(profile.depts)
+        ? profile.depts.map(cleanText).filter(d => departments.some(item => normalized(item) === normalized(d)))
+        : [];
+      const dept = employee?.dept || cleanText(profile.dept) || depts[0] || "";
+      if (dept && !departments.some(item => normalized(item) === normalized(dept))) departments.push(dept);
+      return {
+        name,
+        role,
+        dept,
+        depts: role === 'manager' ? (depts.length ? depts : [dept].filter(Boolean)) : [dept].filter(Boolean),
+        employeeId: employee?.id || null
+      };
+    }
+
+    function allDepartments(){
+      const set = new Set((state.departments || []).filter(Boolean));
+      state.employees.map(e => e.dept).filter(Boolean).forEach(dept => set.add(dept));
+      Object.keys(state.managers || {}).forEach(dept => set.add(dept));
+      return [...set].sort((a,b)=>a.localeCompare(b,'ru'));
+    }
+    function ensureDepartment(dept){
+      const name = cleanText(dept);
+      if (!name) return "";
+      state.departments = Array.isArray(state.departments) ? state.departments : [];
+      if (!state.departments.some(d => normalized(d) === normalized(name))) state.departments.push(name);
+      if (!state.managers || typeof state.managers !== 'object') state.managers = {};
+      if (!(name in state.managers)) state.managers[name] = null;
+      return name;
+    }
+    function similarDepartments(value){
+      const source = normalized(value); if (!source) return [];
+      return allDepartments().filter(d => {
+        const n = normalized(d);
+        return n !== source && (n.includes(source) || source.includes(n) || n.startsWith(source.slice(0,3)));
+      }).slice(0,3);
+    }
+    function isManager(){ return state.profile?.role === 'manager'; }
+    function managerDepartments(){ return isManager() ? (state.profile.depts || [state.profile.dept].filter(Boolean)) : []; }
+    function viewDepartments(){
+      return Array.isArray(state.viewDepts) && state.viewDepts.length ? state.viewDepts : [];
+    }
+
+    function isValidDateObject(date){ return date instanceof Date && !Number.isNaN(date.getTime()); }
+    function formatISO(date){
+      if (!isValidDateObject(date)) return "";
+      return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    }
+    function parseDate(iso){
+      const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return new Date(NaN);
+      const [, y, m, d] = match.map(Number);
+      const date = new Date(y, m - 1, d);
+      return formatISO(date) === String(iso) ? date : new Date(NaN);
+    }
+    function isValidDateISO(iso){ return isValidDateObject(parseDate(iso)); }
+    function toDate(value){ return value instanceof Date ? new Date(value.getFullYear(), value.getMonth(), value.getDate()) : parseDate(value); }
+    function yearStart(year = state.year){ return new Date(Number(year), 0, 1); }
+    function yearEnd(year = state.year){ return new Date(Number(year), 11, 31); }
+    function nextYearStart(year = state.year){ return new Date(Number(year) + 1, 0, 1); }
+    function rangesOverlap(start, end, rangeStart, rangeEnd){
+      return isValidDateObject(start) && isValidDateObject(end) && start <= rangeEnd && end >= rangeStart;
+    }
+    function dateLabel(iso){
+      const date = parseDate(iso);
+      return isValidDateObject(date) ? date.toLocaleDateString('ru-RU', { day:'numeric', month:'short' }).replace('.','') : '—';
+    }
+    function monthDays(i, year = state.year){ return new Date(year, i+1, 0).getDate(); }
+    function daysBetweenDates(start, end){
+      const a = toDate(start), b = toDate(end);
+      if (!isValidDateObject(a) || !isValidDateObject(b) || b < a) return 0;
+      return Math.round((b-a)/MS_DAY)+1;
+    }
+    function vacationDays(v){ return daysBetweenDates(v.start, v.end); }
+    function workingDaysBetween(startISO, endISO){
+      let count = 0, d = toDate(startISO), end = toDate(endISO);
+      if (!isValidDateObject(d) || !isValidDateObject(end) || end < d) return 0;
+      while (d <= end) { const day = d.getDay(); if (day !== 0 && day !== 6) count++; d.setDate(d.getDate()+1); }
+      return count;
+    }
+    function workingDaysInYear(year){
+      let count = 0, d = new Date(year,0,1);
+      while (d.getFullYear() === year) { const day = d.getDay(); if (day !== 0 && day !== 6) count++; d.setDate(d.getDate()+1); }
+      return count;
+    }
+    function visualStatus(v){
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const end = parseDate(v.end);
+      if (!isValidDateObject(end)) return normalizeStatus(v.status);
+      return end < today ? 'past' : normalizeStatus(v.status);
+    }
+
+    function timelineWidth(){ return state.zoom * 12; }
+    function xForDate(value, year = state.year){
+      const date = toDate(value);
+      if (!isValidDateObject(date)) return 0;
+      if (date <= yearStart(year)) return 0;
+      if (date >= nextYearStart(year)) return timelineWidth();
+      const month = date.getMonth();
+      const days = monthDays(month, year);
+      return month * state.zoom + ((date.getDate()-1) / days) * state.zoom;
+    }
+    function dateFromX(x){
+      const safeX = Math.max(0, Math.min(timelineWidth()-1, x));
+      const month = Math.max(0, Math.min(11, Math.floor(safeX / state.zoom)));
+      const inside = safeX - month * state.zoom;
+      const day = Math.max(1, Math.min(monthDays(month), Math.floor((inside / state.zoom) * monthDays(month)) + 1));
+      return new Date(state.year, month, day);
+    }
+    function rawWidth(start, end){
+      const endPlus = toDate(end);
+      if (!isValidDateObject(endPlus)) return 6;
+      endPlus.setDate(endPlus.getDate()+1);
+      return Math.max(6, xForDate(endPlus) - xForDate(start));
+    }
+    function clampVacation(v, year = state.year){
+      const ys = yearStart(year), ye = yearEnd(year);
+      let start = parseDate(v.start), end = parseDate(v.end);
+      if (!rangesOverlap(start, end, ys, ye)) return null;
+      if (start < ys) start = ys;
+      if (end > ye) end = ye;
+      return { start, end };
+    }
+    function vacationsForYear(employeeId, year = state.year){
+      return state.vacations.filter(v => v.employeeId === employeeId && clampVacation(v, year));
+    }
+    function vacationDaysInYear(v, year = state.year){
+      const period = clampVacation(v, year);
+      return period ? daysBetweenDates(period.start, period.end) : 0;
+    }
+    function workingDaysInVacationYear(v, year = state.year){
+      const period = clampVacation(v, year);
+      return period ? workingDaysBetween(period.start, period.end) : 0;
+    }
+
+    function getEmployee(id){ return state.employees.find(e => e.id === id); }
+    function profileEmployee(){
+      if (!state.profile?.employeeId && !state.profile?.name) return null;
+      const direct = state.employees.find(e => e.id === state.profile.employeeId) || state.employees.find(e => normalized(e.name) === normalized(state.profile.name));
+      if (direct) return direct;
+      if (isManager()) {
+        const ids = uniqueEmployees(managerDepartments().map(d => managerForDepartment(d)).filter(Boolean));
+        if (ids.length === 1) return ids[0];
+      }
       return null;
     }
-  }
-
-  async function tryBootstrapFirstAdmin(user) {
-    try {
-      await set(ref(db, `roles/${user.uid}`), {
-        role: 'admin',
-        email: normalizeEmail(user.email || ''),
-        departmentIds: {},
-        fullName: pendingRegistrationFullName || '',
-        grantedAt: nowTs(),
-        grantedBy: user.uid,
-        source: 'bootstrap'
-      });
-      return true;
-    } catch (error) {
-      return false;
+    function managerForDepartment(dept){ const managerId = state.managers?.[dept]; return managerId ? getEmployee(managerId) : null; }
+    function employeeManagesDepartment(employeeId){
+      return Object.values(state.managers || {}).some(id => id === employeeId);
     }
-  }
-
-  async function tryApplyInviteRole(user) {
-    if (!user?.email) return false;
-    const key = emailKey(user.email);
-    try {
-      const inviteSnapshot = await get(ref(db, `roleInvites/${key}`));
-      if (!inviteSnapshot.exists()) return false;
-      const invite = inviteSnapshot.val();
-      if (!invite || invite.isActive === false) return false;
-
-      await set(ref(db, `roles/${user.uid}`), {
-        role: invite.role || 'manager',
-        email: normalizeEmail(user.email),
-        departmentIds: invite.departmentIds || {},
-        fullName: invite.fullName || pendingRegistrationFullName || '',
-        inviteKey: key,
-        grantedAt: nowTs(),
-        grantedBy: invite.createdBy || 'admin',
-        source: 'invite'
-      });
-      return true;
-    } catch (error) {
-      return false;
+    function clearManagerLinks(employeeId){
+      Object.keys(state.managers || {}).forEach(dept => { if (state.managers[dept] === employeeId) state.managers[dept] = null; });
     }
-  }
-
-  async function resolveCurrentRole(user) {
-    if (!user) return null;
-
-    let roleRecord = await loadMyRole(user.uid);
-    if (roleRecord) return roleRecord;
-
-    const bootstrapped = await tryBootstrapFirstAdmin(user);
-    if (bootstrapped) {
-      roleRecord = await loadMyRole(user.uid);
-      if (roleRecord) return roleRecord;
-    }
-
-    const invited = await tryApplyInviteRole(user);
-    if (invited) {
-      roleRecord = await loadMyRole(user.uid);
-      if (roleRecord) return roleRecord;
-    }
-
-    return null;
-  }
-
-  function applyRoleRecord(roleRecord) {
-    currentRoleRecord = roleRecord;
-    currentRole = roleRecord?.role || 'viewer';
-    currentDepartmentIds = new Set(Object.keys(roleRecord?.departmentIds || {}).filter(id => roleRecord.departmentIds[id] === true));
-  }
-
-  function showTooltip(event, text) {
-    els.tooltip.textContent = text;
-    els.tooltip.classList.add('visible');
-    moveTooltip(event);
-  }
-
-  function moveTooltip(event) {
-    els.tooltip.style.left = `${event.clientX + 14}px`;
-    els.tooltip.style.top = `${event.clientY - 28}px`;
-  }
-
-  function hideTooltip() {
-    els.tooltip.classList.remove('visible');
-  }
-
-  function syncVacationColorToSelectedEmployee(force = false) {
-    const employee = state.employees?.[els.employeeSelect.value];
-    if (!employee?.color) return;
-    if (force || !els.vacationId.value) {
-      els.vacationColor.value = employee.color;
-    }
-  }
-
-  function openEmployeeColorPicker(employeeId) {
-    const employee = state.employees?.[employeeId];
-    if (!employee || !canManageEmployee(employee)) return;
-    els.employeeColorPicker.value = employee.color || defaultEmployeeColor(employee.displayName);
-    els.employeeColorPicker.onchange = async () => {
-      const nextColor = els.employeeColorPicker.value;
-      const updates = {
-        [`scheduleV2/employees/${employeeId}/color`]: nextColor,
-        [`scheduleV2/employees/${employeeId}/updatedAt`]: nowTs(),
-        [`scheduleV2/employees/${employeeId}/updatedBy`]: currentUser?.uid || 'unknown'
-      };
-
-      Object.values(state.vacations || {}).forEach(vacation => {
-        if (vacation && vacation.employeeId === employeeId) {
-          updates[`scheduleV2/vacations/${vacation.id}/color`] = nextColor;
-          updates[`scheduleV2/vacations/${vacation.id}/updatedAt`] = nowTs();
-          updates[`scheduleV2/vacations/${vacation.id}/updatedBy`] = currentUser?.uid || 'unknown';
+    function setDepartmentManager(dept, employeeId){
+      const previousId = state.managers?.[dept];
+      state.managers[dept] = employeeId;
+      if (previousId && previousId !== employeeId && !employeeManagesDepartment(previousId)) {
+        const previous = getEmployee(previousId);
+        if (previous) {
+          previous.role = 'staff';
+          if (previous.position === 'Руководитель отдела') previous.position = 'Специалист';
         }
-      });
-
-      try {
-        await update(ref(db), updates);
-      } catch (error) {
-        console.error('Ошибка обновления цвета сотрудника:', error);
-        alert('Не удалось обновить цвет сотрудника');
-      } finally {
-        els.employeeColorPicker.value = '#2d63dd';
       }
-    };
-    els.employeeColorPicker.click();
-  }
+    }
 
-  function createMonthsHeader() {
-    els.months.innerHTML = '';
-    let totalWidth = 0;
+    function uniqueEmployees(list){
+      const seen = new Set();
+      return list.filter(e => e && !seen.has(e.id) && seen.add(e.id));
+    }
+    function initialsFromName(name){
+      return String(name || '').trim().split(/\s+/).slice(0,2).map(p => p[0]).join('').toUpperCase() || 'Я';
+    }
+    function employeeOptionLabel(e){
+      const role = e.role === 'manager' ? 'руководитель' : (e.dept || 'без отдела');
+      return `${e.name} · ${e.position || role}`;
+    }
+    function findEmployeeByName(name, departments = []){
+      const n = normalized(name);
+      if (!n) return null;
+      const pool = state.employees.filter(e => !departments.length || departments.some(d => normalized(d) === normalized(e.dept)) || e.role === 'manager');
+      const exact = pool.find(e => normalized(e.name) === n);
+      if (exact) return exact;
+      const token = n.split(/\s+/)[0];
+      if (token && token.length >= 4) {
+        const surnameMatches = pool.filter(e => normalized(e.name).split(/\s+/)[0] === token);
+        if (surnameMatches.length === 1) return surnameMatches[0];
+      }
+      return null;
+    }
+    function onboardingRole(){ return document.querySelector('input[name="onboardRole"]:checked')?.value || 'employee'; }
+    function onboardingSelectedDepartments(){
+      const role = onboardingRole();
+      if (role === 'manager') return [...document.querySelectorAll('#managerDeptChecks input:checked')].map(i => i.value);
+      if ($('onboardDept').value === '__new') return [];
+      return [$('onboardDept').value].filter(Boolean);
+    }
+    function onboardingCandidates(){
+      const role = onboardingRole();
+      const selected = onboardingSelectedDepartments();
+      if (role === 'manager') {
+        const assignedIds = selected.map(d => state.managers?.[d]).filter(Boolean);
+        const assigned = assignedIds.map(id => getEmployee(id)).filter(Boolean);
+        const managers = state.employees.filter(e => e.role === 'manager');
+        const inSelectedDepartments = selected.length ? state.employees.filter(e => selected.some(d => normalized(d) === normalized(e.dept))) : [];
+        const byName = findEmployeeByName($('onboardName').value, selected);
+        return uniqueEmployees([...assigned, ...managers, ...inSelectedDepartments, byName].filter(Boolean)).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+      }
+      if (!selected.length) return [];
+      return state.employees
+        .filter(e => e.role !== 'manager' && selected.some(d => normalized(d) === normalized(e.dept)))
+        .sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+    }
+    function renderIdentityPicker(){
+      const field = $('existingEmployeeField');
+      const select = $('existingEmployeeSelect');
+      if (!field || !select) return;
+      const candidates = onboardingCandidates();
+      if (!candidates.length) {
+        field.classList.add('hidden');
+        select.innerHTML = '<option value="__new">Создать новую карточку</option>';
+        select.value = '__new';
+        return;
+      }
+      const current = select.value;
+      field.classList.remove('hidden');
+      select.innerHTML = '<option value="">Выберите сотрудника…</option>' +
+        candidates.map(e => `<option value="${e.id}">${escapeHTML(employeeOptionLabel(e))}</option>`).join('') +
+        '<option value="__new">Меня нет в списке — создать новую карточку</option>';
+      const exact = findEmployeeByName($('onboardName').value, onboardingSelectedDepartments());
+      if (exact && candidates.some(e => e.id === exact.id)) select.value = exact.id;
+      else if ([...select.options].some(o => o.value === current)) select.value = current;
+    }
+    function selectedOnboardingEmployee(){
+      const field = $('existingEmployeeField');
+      const select = $('existingEmployeeSelect');
+      if (!field || field.classList.contains('hidden') || !select.value || select.value === '__new') return null;
+      return getEmployee(select.value);
+    }
+    function employeeStats(employeeId){
+      const vacations = vacationsForYear(employeeId);
+      const mainVacations = vacations.filter(v => vacationType(v) === 'main');
+      const extraVacations = vacations.filter(v => vacationType(v) === 'extra');
+      const mainDays = mainVacations.reduce((sum,v)=>sum+vacationDaysInYear(v),0);
+      const extraDays = extraVacations.reduce((sum,v)=>sum+vacationDaysInYear(v),0);
+      const calendarDays = mainDays + extraDays;
+      const workDays = vacations.reduce((sum,v)=>sum+workingDaysInVacationYear(v),0);
+      const left = Math.max(0, ANNUAL_ALLOWANCE-mainDays);
+      const over = Math.max(0, mainDays-ANNUAL_ALLOWANCE);
+      return { vacations, mainVacations, extraVacations, calendarDays, mainDays, extraDays, workDays, left, over };
+    }
 
-    MONTHS.forEach((name, monthIndex) => {
-      const days = daysInMonth(monthIndex);
-      const collapsed = isMonthCollapsed(monthIndex);
-      const width = getMonthWidth(monthIndex);
-      totalWidth += width;
+    function balanceLabel(stats){
+      const mainPart = stats.over > 0
+        ? `Основной: ${stats.mainDays}/${ANNUAL_ALLOWANCE} · сверх ${stats.over}`
+        : `Основной: ${stats.mainDays}/${ANNUAL_ALLOWANCE} · осталось ${stats.left}`;
+      return stats.extraDays > 0 ? `${mainPart} · Доп.: ${stats.extraDays}` : mainPart;
+    }
+    function conflictKey(a,b){ return [a,b].sort().join('__'); }
+    function isConflictAllowed(a,b){ return state.allowedConflicts.includes(conflictKey(a,b)); }
+    function cleanupAllowedConflicts(){
+      const ids = new Set(state.vacations.map(v => v.id));
+      state.allowedConflicts = (state.allowedConflicts || []).filter(key => {
+        const [a,b] = String(key).split('__');
+        return a && b && a !== b && ids.has(a) && ids.has(b);
+      });
+    }
+    function removeAllowedConflictsFor(vacationId){
+      state.allowedConflicts = (state.allowedConflicts || []).filter(key => !String(key).split('__').includes(vacationId));
+    }
+    function overlapsFor(vacation, deptContext){
+      if (deptContext === '__manager__') return [];
+      const current = clampVacation(vacation);
+      if (!current) return [];
+      const start = current.start, end = current.end;
+      const intervals = [];
+      state.vacations.forEach(other => {
+        if (other.id === vacation.id || isConflictAllowed(vacation.id, other.id)) return;
+        const otherEmployee = getEmployee(other.employeeId);
+        if (!otherEmployee || otherEmployee.dept !== deptContext) return;
+        const otherPeriod = clampVacation(other);
+        if (!otherPeriod) return;
+        const os = otherPeriod.start, oe = otherPeriod.end;
+        const overlapStart = new Date(Math.max(start, os));
+        const overlapEnd = new Date(Math.min(end, oe));
+        if (overlapStart <= overlapEnd) intervals.push({ start: overlapStart, end: overlapEnd, other, otherEmployee });
+      });
+      return intervals.sort((a,b)=>a.start-b.start);
+    }
 
-      const month = document.createElement('div');
-      month.className = `month ${collapsed ? 'collapsed' : ''}`;
-      month.style.width = `${width}px`;
-      month.style.minWidth = `${width}px`;
+    function getVisibleEmployees(){
+      const query = normalized(state.query);
+      const depts = viewDepartments();
+      const filtered = state.employees.filter(e => {
+        if (e.role === 'manager') return false;
+        const deptOk = depts.some(d => normalized(d) === normalized(e.dept));
+        const searchOk = !query || normalized(`${e.name} ${e.dept}`).includes(query);
+        if (!deptOk || !searchOk) return false;
+        const vacations = vacationsForYear(e.id);
+        if (state.filter === 'empty') return vacations.length === 0;
+        if (state.filter === 'planned') return vacations.some(v => visualStatus(v) === 'planned');
+        if (state.filter === 'approved') return vacations.some(v => visualStatus(v) === 'approved');
+        if (state.filter === 'past') return vacations.some(v => visualStatus(v) === 'past');
+        return true;
+      });
+      return filtered;
+    }
 
-      if (collapsed) {
-        month.innerHTML = `<button class="month-collapse-pill" type="button" data-month="${monthIndex}" title="Развернуть ${name}"><span>${name}</span></button>`;
+    function buildRows(){
+      const depts = viewDepartments();
+      const visible = getVisibleEmployees();
+      const rows = [];
+      if (isManager()) {
+        const assignedManagers = uniqueEmployees(depts.map(d => managerForDepartment(d)).filter(Boolean));
+        const manager = profileEmployee() || assignedManagers[0];
+        if (manager) rows.push({ type:'manager', employee: manager, dept:'__manager__', title:'Руководитель' });
       } else {
-        month.innerHTML = `
-          <div class="month-head">
-            <div class="month-name">${name}</div>
-            <button class="month-toggle-btn" type="button" data-month="${monthIndex}" title="Свернуть ${name}">×</button>
-          </div>
-          <div class="days" style="grid-template-columns: repeat(${days}, minmax(0, 1fr));">
-            ${Array.from({ length: days }, (_, i) => `<div class="day">${i + 1}</div>`).join('')}
-          </div>
-        `;
+        const dept = depts[0];
+        const manager = managerForDepartment(dept);
+        if (manager) rows.push({ type:'manager', employee: manager, dept, title:'Руководитель отдела' });
       }
-
-      els.months.appendChild(month);
-    });
-
-    els.board.style.minWidth = `calc(var(--left-w) + ${totalWidth}px)`;
-    els.timelineCol.style.width = `${totalWidth}px`;
-    els.timelineCol.style.minWidth = `${totalWidth}px`;
-
-    renderMonthSeparators();
-
-    els.months.querySelectorAll('.month-toggle-btn, .month-collapse-pill').forEach(btn => {
-      btn.addEventListener('click', () => toggleMonth(Number(btn.dataset.month)));
-    });
-  }
-
-  function renderMonthSeparators() {
-    els.timelineGrid.innerHTML = '';
-    let offset = 0;
-    for (let i = 0; i < MONTHS.length - 1; i++) {
-      offset += getMonthWidth(i);
-      const line = document.createElement('div');
-      line.className = 'month-separator';
-      line.style.left = `${offset}px`;
-      els.timelineGrid.appendChild(line);
-    }
-  }
-
-  function toggleMonth(monthIndex) {
-    if (collapsedMonths.includes(monthIndex)) {
-      collapsedMonths = collapsedMonths.filter(item => item !== monthIndex);
-    } else {
-      collapsedMonths = [...collapsedMonths, monthIndex].sort((a, b) => a - b);
-    }
-    saveCollapsedMonths();
-    createMonthsHeader();
-    renderBoard();
-  }
-
-  function expandAllMonths() {
-    collapsedMonths = [];
-    saveCollapsedMonths();
-    createMonthsHeader();
-    renderBoard();
-  }
-
-  function renderBranchFilter() {
-    const branches = getBranches();
-    const previous = els.branchFilter.value;
-    els.branchFilter.innerHTML = branches.map(branch => `<option value="${escapeHtml(branch.id)}">${escapeHtml(branch.name)}</option>`).join('');
-    const values = branches.map(branch => branch.id);
-    els.branchFilter.value = values.includes(previous) ? previous : (branches[0]?.id || NORTHWEST_BRANCH_ID);
-    els.branchBadge.textContent = getCurrentBranchName();
-
-    els.adminDepartmentBranchSelect.innerHTML = branches.map(branch => `<option value="${escapeHtml(branch.id)}">${escapeHtml(branch.name)}</option>`).join('');
-    els.adminDepartmentBranchSelect.value = getCurrentBranchId();
-  }
-
-  function renderDepartmentFilter() {
-    const currentBranchId = getCurrentBranchId();
-    const previous = els.groupFilter.value || 'all';
-    const departments = getActiveDepartments(currentBranchId);
-    els.groupFilter.innerHTML = `<option value="all">Все отделы</option>${departments.map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`).join('')}`;
-    const values = ['all', ...departments.map(dep => dep.id)];
-    els.groupFilter.value = values.includes(previous) ? previous : 'all';
-  }
-
-  function renderVacationEmployeeOptions() {
-    const branchId = getCurrentBranchId();
-    const employees = getEmployees({ branchId }).filter(emp => canManageEmployee(emp));
-    if (employees.length === 0) {
-      els.employeeSelect.innerHTML = '<option value="">Нет доступных сотрудников</option>';
-      return;
-    }
-    els.employeeSelect.innerHTML = employees.map(emp => `<option value="${escapeHtml(emp.id)}">${escapeHtml(employeeLabelWithPosition(emp))} — ${escapeHtml(getDepartmentName(emp.departmentId))}</option>`).join('');
-  }
-
-  function renderEmployeeDepartmentOptions() {
-    const query = normalizeText(els.employeeDepartmentSearch.value);
-    const departments = getActiveDepartments(getCurrentBranchId()).filter(dep => canManageDepartment(dep.id));
-    const filtered = departments.filter(dep => !query || normalizeText(dep.name).includes(query));
-
-    if (filtered.length === 0) {
-      els.employeeDepartmentSelect.innerHTML = '<option value="">Отдел не найден</option>';
-      return;
+      depts.forEach(dept => {
+        rows.push({ type:'group', dept });
+        if (!state.collapsed[dept]) {
+          visible.filter(e => normalized(e.dept) === normalized(dept)).sort((a,b)=>a.name.localeCompare(b.name,'ru')).forEach(employee => rows.push({ type:'employee', employee, dept }));
+        }
+      });
+      return rows;
     }
 
-    els.employeeDepartmentSelect.innerHTML = filtered.map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`).join('');
-  }
-
-  function renderRemoveEmployeeDepartmentOptions() {
-    const previous = els.removeEmployeeGroupSelect.value;
-    const departments = getActiveDepartments(getCurrentBranchId()).filter(dep => canManageDepartment(dep.id));
-    if (departments.length === 0) {
-      els.removeEmployeeGroupSelect.innerHTML = '<option value="">Нет доступных отделов</option>';
-      els.removeEmployeeSelect.innerHTML = '<option value="">Нет сотрудников</option>';
-      return;
+    function availableYears(){
+      const years = new Set([...DEFAULT_YEARS, state.year]);
+      state.vacations.forEach(v => {
+        const start = parseDate(v.start), end = parseDate(v.end);
+        if (isValidDateObject(start)) years.add(start.getFullYear());
+        if (isValidDateObject(end)) years.add(end.getFullYear());
+      });
+      return [...years].filter(y => Number.isInteger(y) && y >= 1900 && y <= 2100).sort((a,b)=>a-b);
+    }
+    function employeesForCurrentView(){
+      const depts = viewDepartments();
+      if (!depts.length) return [];
+      return state.employees.filter(e => depts.some(dept => normalized(dept) === normalized(e.dept)));
     }
 
-    els.removeEmployeeGroupSelect.innerHTML = departments.map(dep => `<option value="${escapeHtml(dep.id)}">${escapeHtml(dep.name)}</option>`).join('');
-    const values = departments.map(dep => dep.id);
-    els.removeEmployeeGroupSelect.value = values.includes(previous) ? previous : departments[0].id;
-    refreshRemoveEmployeeSelect();
-  }
-
-  function refreshRemoveEmployeeSelect() {
-    const departmentId = els.removeEmployeeGroupSelect.value;
-    const employees = getEmployees({ departmentId }).filter(emp => canManageEmployee(emp));
-    if (employees.length === 0) {
-      els.removeEmployeeSelect.innerHTML = '<option value="">Нет сотрудников</option>';
-      return;
-    }
-    els.removeEmployeeSelect.innerHTML = employees.map(emp => `<option value="${escapeHtml(emp.id)}">${escapeHtml(employeeLabelWithPosition(emp))}</option>`).join('');
-  }
-
-  function getFilteredGroups() {
-    const branchId = getCurrentBranchId();
-    const selectedDepartment = els.groupFilter.value || 'all';
-    const query = normalizeText(els.searchInput.value);
-
-    return getActiveDepartments(branchId)
-      .filter(dep => selectedDepartment === 'all' || dep.id === selectedDepartment)
-      .map(dep => ({
-        department: dep,
-        employees: getEmployees({ departmentId: dep.id }).filter(emp => !query || normalizeText(emp.displayName).includes(query))
-      }))
-      .filter(group => group.employees.length > 0);
-  }
-
-  function renderFilters() {
-    renderBranchFilter();
-    renderDepartmentFilter();
-    renderVacationEmployeeOptions();
-    renderEmployeeDepartmentOptions();
-    renderRemoveEmployeeDepartmentOptions();
-  }
-
-  function renderBoard() {
-    const groups = getFilteredGroups();
-    els.namesCol.innerHTML = '';
-    els.timelineGroups.innerHTML = '';
-    els.branchBadge.textContent = getCurrentBranchName();
-
-    let visibleEmployees = 0;
-    let visibleVacations = 0;
-
-    if (groups.length === 0) {
-      els.namesCol.innerHTML = `<div class="empty-state">Нет сотрудников для отображения</div>`;
-      els.timelineGroups.innerHTML = `<div class="empty-state">Выберите другой филиал, отдел или очистите поиск</div>`;
+    function syncControls(){
+      document.documentElement.style.setProperty('--month', `${state.zoom}px`);
+      els.title.textContent = `График отпусков ${state.year}`;
+      els.profileLine.textContent = state.profile?.name ? `${state.profile.name} · ${isManager() ? 'руководитель' : state.profile.dept || 'сотрудник'}` : 'рабочий график команды';
+      els.search.value = state.query;
+      els.year.innerHTML = availableYears().map(year => `<option value="${year}">${year}</option>`).join('');
+      els.year.value = String(state.year);
+      els.zoomSlider.value = state.zoom;
+      els.zoomValue.textContent = `${Math.round((state.zoom / 300) * 100)}%`;
+      const viewEmployees = employeesForCurrentView();
+      const hasSelectedDepartment = viewDepartments().length > 0;
+      const hasEmployees = viewEmployees.length > 0;
+      $('addVacationBtn').disabled = !hasSelectedDepartment || !hasEmployees;
+      $('addVacationBtn').title = !hasSelectedDepartment ? 'Сначала выберите отдел' : hasEmployees ? '' : 'Сначала добавьте сотрудника в выбранный отдел';
+      els.vacationEmployee.innerHTML = hasEmployees
+        ? viewEmployees.map(e => `<option value="${e.id}">${escapeHTML(e.name)} · ${escapeHTML(e.dept)}</option>`).join('')
+        : '<option value="">Нет сотрудников в выбранном отделе</option>';
+      renderEmployeeDeptOptions($('employeeDept').value);
+      document.querySelectorAll('[data-filter]').forEach(chip => chip.classList.toggle('active', chip.dataset.filter === state.filter));
+      renderDepartmentControls();
     }
 
-    groups.forEach(group => {
-      const namesGroup = document.createElement('div');
-      namesGroup.className = 'group';
+    function renderEmployeeDeptOptions(selectedDept = ''){
+      const select = $('employeeDept');
+      const departments = allDepartments();
+      if (!departments.length) {
+        select.innerHTML = '<option value="">Сначала добавьте отдел</option>';
+        select.value = '';
+        select.disabled = true;
+        return;
+      }
+      select.disabled = false;
+      const selected = departments.find(dept => normalized(dept) === normalized(selectedDept)) || departments[0];
+      select.innerHTML = departments.map(dept => `<option value="${escapeHTML(dept)}">${escapeHTML(dept)}</option>`).join('');
+      select.value = selected;
+    }
 
-      const timelineGroup = document.createElement('div');
-      timelineGroup.className = 'group';
-
-      const bodyNames = document.createElement('div');
-      bodyNames.className = 'group-body';
-
-      const bodyTimeline = document.createElement('div');
-      bodyTimeline.className = 'group-body';
-
-      namesGroup.innerHTML = `<div class="group-title">${escapeHtml(group.department.name)}</div>`;
-      timelineGroup.innerHTML = `<div class="group-title ghost-title">${escapeHtml(group.department.name)}</div>`;
-
-      group.employees.forEach(employee => {
-        visibleEmployees += 1;
-
-        const rowName = document.createElement('div');
-        rowName.className = 'employee-row-name';
-        rowName.innerHTML = `
-          <span class="employee-name-wrap">
-            <span class="employee-name-text">${escapeHtml(employee.displayName)}</span>
-            ${employee.position ? `<span class="employee-position-text">(${escapeHtml(employee.position)})</span>` : ''}
-          </span>
-          <button type="button" class="employee-color-dot ${canManageEmployee(employee) ? 'is-editable' : ''}" data-employee-id="${escapeHtml(employee.id)}" title="${canManageEmployee(employee) ? 'Изменить закрепленный цвет сотрудника' : 'Закрепленный цвет сотрудника'}" style="--employee-color:${escapeHtml(employee.color || defaultEmployeeColor(employee.displayName))}"></button>
-        `;
-        bodyNames.appendChild(rowName);
-
-        const rowTimeline = document.createElement('div');
-        rowTimeline.className = 'vacation-row';
-
-        const vacations = getVacationsForEmployee(employee.id);
-        visibleVacations += vacations.length;
-
-        vacations.forEach(vac => {
-          const bar = document.createElement('div');
-          bar.className = 'vacation-bar';
-          if (vac.status && vac.status !== 'approved') {
-            bar.classList.add(`status-${vac.status}`);
-          }
-          bar.style.left = `${offsetForDate(vac.start)}px`;
-          bar.style.width = `${durationWidth(vac.start, vac.end)}px`;
-          bar.style.background = vac.color || '#2d63dd';
-          bar.dataset.tip = formatTooltip(vac);
-
-          bar.addEventListener('mouseenter', e => showTooltip(e, bar.dataset.tip));
-          bar.addEventListener('mousemove', moveTooltip);
-          bar.addEventListener('mouseleave', hideTooltip);
-          bar.addEventListener('dblclick', () => {
-            if (!canManageVacation(vac)) return;
-            openVacationModal(vac);
-          });
-          rowTimeline.appendChild(bar);
+    function renderDepartmentControls(){
+      const departments = allDepartments();
+      const selected = viewDepartments();
+      els.multiDeptWrap.classList.remove('hidden');
+      els.departmentPickerLabel.textContent = selected[0] || 'Выбрать отдел';
+      $('deptAllBtn').classList.add('hidden');
+      $('deptOwnBtn').classList.add('hidden');
+      els.departmentOptions.innerHTML = departments.map(dept => {
+        const checked = selected.some(d => normalized(d) === normalized(dept));
+        return `<label class="dept-chip ${checked ? 'active' : ''}"><input type="radio" name="viewDept" value="${escapeHTML(dept)}" ${checked ? 'checked' : ''}><span>${escapeHTML(dept)}</span></label>`;
+      }).join('');
+      els.departmentOptions.querySelectorAll('label').forEach(label => {
+        const input = label.querySelector('input');
+        input.addEventListener('change', () => {
+          els.departmentOptions.querySelectorAll('label').forEach(item => item.classList.remove('active'));
+          label.classList.add('active');
         });
-
-        bodyTimeline.appendChild(rowTimeline);
       });
+    }
+    function openDepartmentPicker(){
+      renderDepartmentControls();
+      setDepartmentPopoverOpen(true);
+      setMenuOpen(false);
+    }
 
-      addDepartmentOverlapLines(group.employees, bodyTimeline);
-      namesGroup.appendChild(bodyNames);
-      timelineGroup.appendChild(bodyTimeline);
+    function vacationType(v){ return v.type === 'extra' ? 'extra' : 'main'; }
+    function shortLabel(v){ return `${vacationType(v) === 'extra' ? 'Доп · ' : ''}${dateLabel(v.start)} – ${dateLabel(v.end)} (${vacationDays(v)})`; }
+    function todayLineX(){
+      const today = new Date();
+      if (today.getFullYear() !== state.year) return null;
+      return xForDate(today);
+    }
 
-      els.namesCol.appendChild(namesGroup);
-      els.timelineGroups.appendChild(timelineGroup);
-    });
+    function renderTimeline(){
+      const rows = buildRows();
+      const personRow = Number(getComputedStyle(document.documentElement).getPropertyValue('--person-row').replace('px','')) || 76;
+      const managerRow = Number(getComputedStyle(document.documentElement).getPropertyValue('--manager-row').replace('px','')) || 78;
+      const groupRow = Number(getComputedStyle(document.documentElement).getPropertyValue('--group-row').replace('px','')) || 44;
+      const heights = rows.map(r => r.type === 'group' ? `${groupRow}px` : r.type === 'manager' ? `${managerRow}px` : `${personRow}px`);
+      els.table.style.gridTemplateRows = `var(--head-row) ${heights.length ? heights.join(' ') : '230px'}`;
+      const html = [];
+      const todayX = todayLineX();
 
-    els.namesCol.querySelectorAll('.employee-color-dot.is-editable').forEach(btn => {
-      btn.onclick = event => {
-        event.stopPropagation();
-        openEmployeeColorPicker(btn.dataset.employeeId);
-      };
-    });
+      html.push(`<div class="corner">Сотрудник</div>`);
+      html.push(`<div class="months-head"><div class="months-strip">${MONTHS.map(m => `<div class="month-head">${m}</div>`).join('')}<div class="buffer-head"></div>${todayX === null ? '' : `<div class="head-today-line" style="left:${todayX}px"></div>`}</div></div>`);
 
-    const hint = canEditAnything() ? 'Двойной клик по полоске — редактирование доступного отпуска' : 'Для редактирования войдите как руководитель';
-    els.status.textContent = `Филиал: ${getCurrentBranchName()} · Сотрудников: ${visibleEmployees} · Отпусков: ${visibleVacations} · ${hint}`;
-  }
-
-  function addDepartmentOverlapLines(employees, bodyTimeline) {
-    const employeeIds = new Set(employees.map(emp => emp.id));
-    const vacations = Object.values(state.vacations || {})
-      .filter(Boolean)
-      .filter(v => employeeIds.has(v.employeeId))
-      .map(v => ({ start: dayIndex(v.start), end: dayIndex(v.end) }))
-      .sort((a, b) => a.start - b.start);
-
-    if (vacations.length < 2) return;
-
-    const diff = new Array(getDaysInYear() + 1).fill(0);
-    vacations.forEach(v => {
-      diff[v.start] += 1;
-      if (v.end + 1 < diff.length) diff[v.end + 1] -= 1;
-    });
-
-    let active = 0;
-    let segmentStart = null;
-
-    for (let day = 0; day <= getDaysInYear(); day++) {
-      if (day < getDaysInYear()) active += diff[day];
-      const hasOverlap = active >= 2;
-
-      if (hasOverlap && segmentStart === null) {
-        segmentStart = day;
+      if (!rows.length) {
+        html.push(`
+          <div class="empty-panel" style="grid-row:2;">
+            <div class="empty-text">Выберите отдел, чтобы посмотреть график отпусков.</div>
+            <button class="mini-btn primary-lite" data-choose-dept type="button">Выбрать отдел</button>
+          </div>`);
+        els.table.innerHTML = html.join('');
+        const chooseDept = els.table.querySelector('[data-choose-dept]');
+        if (chooseDept) chooseDept.addEventListener('click', openDepartmentPicker);
+        return;
       }
 
-      if ((!hasOverlap || day === getDaysInYear()) && segmentStart !== null) {
-        const segmentEndExclusive = hasOverlap && day === getDaysInYear() ? day : day;
-        const visibleDays = segmentEndExclusive - segmentStart;
-
-        const startDate = new Date(`${YEAR}-01-01T00:00:00`);
-        startDate.setDate(startDate.getDate() + segmentStart);
-        const endMarkerDate = new Date(`${YEAR}-01-01T00:00:00`);
-        endMarkerDate.setDate(endMarkerDate.getDate() + segmentEndExclusive);
-
-        const startLine = document.createElement('div');
-        startLine.className = 'overlap-line';
-        startLine.style.left = `${offsetForDate(startDate.toISOString().slice(0, 10))}px`;
-        bodyTimeline.appendChild(startLine);
-
-        const endLine = document.createElement('div');
-        endLine.className = 'overlap-line';
-        endLine.style.left = `${offsetForDate(endMarkerDate.toISOString().slice(0, 10))}px`;
-        bodyTimeline.appendChild(endLine);
-
-        if (visibleDays > 0) {
-          const label = document.createElement('div');
-          label.className = 'overlap-label';
-          const startOffset = offsetForDate(startDate.toISOString().slice(0, 10));
-          const endOffset = offsetForDate(endMarkerDate.toISOString().slice(0, 10));
-          label.style.left = `${Math.max(startOffset + 6, (startOffset + endOffset) / 2)}px`;
-          label.textContent = `${visibleDays} дн.`;
-          bodyTimeline.appendChild(label);
+      rows.forEach((row, index) => {
+        const gridRow = index + 2;
+        if (row.type === 'group') {
+          html.push(`
+            <div class="group-left" style="grid-row:${gridRow}">
+              <button class="mini-btn" data-toggle-dept="${escapeHTML(row.dept)}" type="button">${state.collapsed[row.dept] ? '›' : '⌄'}</button>
+              <span>${escapeHTML(row.dept)}</span>
+            </div>
+            <div class="group-rail" style="grid-row:${gridRow}">Отдел</div>
+          `);
+          return;
         }
 
-        segmentStart = null;
-      }
-    }
-  }
+        const stats = employeeStats(row.employee.id);
+        const isSelf = state.profile?.employeeId === row.employee.id;
+        const badge = row.type === 'manager' ? `<span class="manager-badge">${escapeHTML(row.title || 'Руководитель')}</span>` : '';
+        const selfBadge = isSelf ? `<span class="self-badge">Вы</span>` : '';
+        const shownPosition = row.type === 'manager' ? (row.title || row.employee.position || 'Руководитель отдела') : (row.employee.position || 'Сотрудник');
+        const vacations = vacationsForYear(row.employee.id).sort((a,b)=>parseDate(a.start)-parseDate(b.start));
 
-  function updateAuthUI() {
-    if (currentUser) {
-      const email = currentUser.email ? ` · ${currentUser.email}` : '';
-      els.authStatus.textContent = `${roleLabel(currentRole)}${email}`;
-    } else {
-      els.authStatus.textContent = 'Гость';
-    }
-
-    els.requestAccessBtn.hidden = canEditAnything();
-    els.loginBtn.hidden = !!currentUser;
-    els.logoutBtn.hidden = !currentUser;
-    els.addBtn.hidden = !canEditAnything();
-    els.resetBtn.hidden = !canResetAll();
-    els.addEmployeeToolbarBtn.hidden = !canEditAnything();
-    els.removeEmployeeToolbarBtn.hidden = !canEditAnything();
-    els.manageDepartmentsBtn.hidden = !canManageDepartments();
-    els.manageAccessBtn.hidden = !canManageAccess();
-  }
-
-  function openVacationModal(vacation = null) {
-    if (!canEditAnything()) return;
-    renderVacationEmployeeOptions();
-    els.modalBackdrop.classList.add('open');
-
-    if (vacation) {
-      els.modalTitle.textContent = 'Редактировать отпуск';
-      els.vacationId.value = vacation.id;
-      els.employeeSelect.value = vacation.employeeId;
-      els.startDate.value = vacation.start;
-      els.endDate.value = vacation.end;
-      els.vacationColor.value = state.employees?.[vacation.employeeId]?.color || vacation.color || '#2d63dd';
-      els.vacationStatus.value = vacation.status || 'approved';
-      els.comment.value = vacation.comment || '';
-      els.deleteBtn.hidden = false;
-    } else {
-      els.modalTitle.textContent = 'Добавить отпуск';
-      els.vacationId.value = '';
-      els.employeeSelect.selectedIndex = 0;
-      els.startDate.value = `${YEAR}-01-15`;
-      els.endDate.value = `${YEAR}-01-28`;
-      els.vacationColor.value = state.employees?.[els.employeeSelect.value]?.color || '#2d63dd';
-      els.vacationStatus.value = 'approved';
-      els.comment.value = '';
-      els.deleteBtn.hidden = true;
-    }
-  }
-
-  function closeVacationModal() {
-    els.modalBackdrop.classList.remove('open');
-  }
-
-  function openEmployeeModal() {
-    if (!canEditAnything()) return;
-    renderEmployeeDepartmentOptions();
-    els.employeeDepartmentSearch.value = '';
-    els.newEmployeeName.value = '';
-    els.newEmployeeColor.value = defaultEmployeeColor(`${getCurrentBranchId()}-${nowTs()}`);
-    els.employeeModalBackdrop.classList.add('open');
-  }
-
-  function closeEmployeeModal() {
-    els.employeeModalBackdrop.classList.remove('open');
-  }
-
-  function openRemoveEmployeeModal() {
-    if (!canEditAnything()) return;
-    renderRemoveEmployeeDepartmentOptions();
-    els.removeEmployeeModalBackdrop.classList.add('open');
-  }
-
-  function closeRemoveEmployeeModal() {
-    els.removeEmployeeModalBackdrop.classList.remove('open');
-  }
-
-  function openAuthModal() {
-    els.authError.textContent = '';
-    els.authPassword.value = '';
-    els.authModalBackdrop.classList.add('open');
-  }
-
-  function closeAuthModal() {
-    els.authModalBackdrop.classList.remove('open');
-  }
-
-  function openDepartmentRequestModal() {
-    if (!currentUser) {
-      openAuthModal();
-      return;
-    }
-    els.departmentRequestName.value = '';
-    els.departmentRequestError.textContent = '';
-    els.departmentRequestModalBackdrop.classList.add('open');
-  }
-
-  function closeDepartmentRequestModal() {
-    els.departmentRequestModalBackdrop.classList.remove('open');
-  }
-
-  async function loadAdminAccessData() {
-    if (!isAdmin()) return;
-    const [rolesSnapshot, invitesSnapshot, accessRequestsSnapshot] = await Promise.all([get(rolesRootRef), get(invitesRootRef), get(ref(db, 'accessRequests'))]);
-    adminAccessSnapshot = {
-      roles: rolesSnapshot.exists() ? rolesSnapshot.val() : {},
-      roleInvites: invitesSnapshot.exists() ? invitesSnapshot.val() : {},
-      accessRequests: accessRequestsSnapshot.exists() ? accessRequestsSnapshot.val() : {}
-    };
-  }
-
-  function openDepartmentAdminModal() {
-    if (!isAdmin()) return;
-    els.adminDepartmentError.textContent = '';
-    els.adminDepartmentName.value = '';
-    els.adminDepartmentBranchSelect.value = getCurrentBranchId();
-    renderDepartmentAdminModal();
-    els.departmentAdminModalBackdrop.classList.add('open');
-  }
-
-  function closeDepartmentAdminModal() {
-    els.departmentAdminModalBackdrop.classList.remove('open');
-  }
-
-  function openAccessAdminModal() {
-    if (!isAdmin()) return;
-    els.accessInviteError.textContent = '';
-    loadAdminAccessData().then(() => {
-      renderAccessAdminModal();
-      els.accessAdminModalBackdrop.classList.add('open');
-    }).catch(error => {
-      console.error('Ошибка загрузки доступов:', error);
-      alert('Не удалось загрузить доступы');
-    });
-  }
-
-  function closeAccessAdminModal() {
-    els.accessAdminModalBackdrop.classList.remove('open');
-  }
-
-  function getManagedDepartmentCheckboxValues() {
-    return Array.from(els.accessInviteDepartments.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
-  }
-
-  function renderDepartmentAdminModal() {
-    const activeBranchId = els.adminDepartmentBranchSelect.value || getCurrentBranchId();
-    const departments = getActiveDepartments(activeBranchId);
-    const requests = Object.values(state.departmentRequests || {})
-      .filter(Boolean)
-      .filter(req => req.branchId === activeBranchId)
-      .filter(req => (req.status || 'pending') === 'pending')
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-    if (departments.length === 0) {
-      els.departmentList.innerHTML = '<div class="admin-card">В этом филиале пока нет отделов.</div>';
-    } else {
-      els.departmentList.innerHTML = departments.map(dep => `
-        <div class="admin-card">
-          <div class="admin-card-header">
+        html.push(`
+          <div class="employee ${row.type === 'manager' ? 'manager-row' : ''}" style="grid-row:${gridRow}">
+            <div class="avatar">${escapeHTML(row.employee.initials)}</div>
             <div>
-              <div class="admin-card-title">${escapeHtml(dep.name)}</div>
-              <div class="admin-card-meta">${escapeHtml(getCurrentBranchId() === dep.branchId ? getCurrentBranchName() : (state.branches?.[dep.branchId]?.name || 'Филиал'))}</div>
+              <div class="employee-name">${escapeHTML(row.employee.name)}${badge}${selfBadge}</div>
+              <div class="employee-dept">${escapeHTML(shownPosition)}</div>
+              <div class="employee-days">${escapeHTML(balanceLabel(stats))}</div>
             </div>
-            <div class="card-actions">
-              <button type="button" data-action="rename-department" data-id="${escapeHtml(dep.id)}">Переименовать</button>
-              <button type="button" data-action="archive-department" data-id="${escapeHtml(dep.id)}">Архивировать</button>
-              <button type="button" data-action="delete-department" data-id="${escapeHtml(dep.id)}" class="danger-btn">Удалить</button>
+            <button class="more" type="button" data-edit-employee="${row.employee.id}">•••</button>
+          </div>
+        `);
+
+        const bars = vacations.map(v => {
+          const period = clampVacation(v); if (!period) return '';
+          const startX = xForDate(period.start);
+          const calendarWidth = rawWidth(period.start, period.end);
+          const compact = calendarWidth < 150;
+          const labelWidth = 168;
+          const labelGap = 8;
+          const nearEnd = compact && (startX + calendarWidth + labelGap + labelWidth > timelineWidth());
+          const eventLeft = compact && nearEnd ? Math.max(0, startX - labelGap - labelWidth) : startX;
+          const barX = startX - eventLeft;
+          const labelX = compact ? (nearEnd ? 0 : barX + calendarWidth + labelGap) : barX;
+          const eventWidth = compact ? (labelWidth + labelGap + calendarWidth) : calendarWidth;
+          const context = row.type === 'manager' ? '__manager__' : row.dept;
+          const overlaps = overlapsFor(v, context);
+          const visual = visualStatus(v);
+          const label = shortLabel(v);
+          const tip = {
+            employee: row.employee.name,
+            dept: row.type === 'manager' ? 'Руководитель' : row.dept,
+            status: statusText[visual],
+            type: typeText[vacationType(v)],
+            period: `${dateLabel(v.start)} — ${dateLabel(v.end)}`,
+            days: vacationDaysInYear(v),
+            workDays: workingDaysInVacationYear(v),
+            note: v.note || 'Без комментария',
+            conflict: overlaps.length > 0
+          };
+          const conflictSegments = overlaps.map(item => {
+            const segLeft = xForDate(item.start) - startX;
+            const segWidth = rawWidth(item.start, item.end);
+            return `<span class="conflict" style="left:${segLeft}px; width:${segWidth}px;"></span>`;
+          }).join('');
+          return `
+            <button class="vacation ${visual} ${vacationType(v) === 'extra' ? 'extra' : ''} ${compact ? 'compact' : ''} ${nearEnd ? 'near-end' : ''} ${overlaps.length ? 'conflicted' : ''}" style="left:${eventLeft}px; --event-w:${eventWidth}px; --bar-x:${barX}px; --bar-w:${calendarWidth}px; --label-x:${labelX}px;" data-vacation="${v.id}" data-dept-context="${escapeHTML(context)}" data-tip='${escapeHTML(JSON.stringify(tip))}' type="button">
+              <span class="vacation-bar">${conflictSegments}</span>
+              <span class="vacation-label">${escapeHTML(label)}${overlaps.length ? '<span class="warn">!</span>' : ''}</span>
+            </button>`;
+        }).join('');
+
+        html.push(`
+          <div class="track-wrap" data-track-employee="${row.employee.id}" data-track-dept="${escapeHTML(row.dept)}" style="grid-row:${gridRow}">
+            <div class="track-bg">${Array.from({length:12}, () => '<div class="track-cell"></div>').join('')}<div class="track-cell"></div></div>
+            <div class="track-overlay">
+              <div class="drag-selection" data-drag-for="${row.employee.id}:${escapeHTML(row.dept)}"></div>
+              ${bars}
             </div>
           </div>
-        </div>
-      `).join('');
-    }
-
-    if (requests.length === 0) {
-      els.departmentRequestsList.innerHTML = '<div class="admin-card">Нет заявок для выбранного филиала.</div>';
-    } else {
-      els.departmentRequestsList.innerHTML = requests.map(req => `
-        <div class="admin-card">
-          <div class="admin-card-header">
-            <div>
-              <div class="admin-card-title">${escapeHtml(req.requestedName)}</div>
-              <div class="admin-card-meta">Статус: ${escapeHtml(req.status || 'pending')} · ${req.requestedByEmail ? escapeHtml(req.requestedByEmail) : 'без email'}</div>
-            </div>
-            <div class="card-actions">
-              <button type="button" data-action="approve-request" data-id="${escapeHtml(req.id)}">Одобрить</button>
-              <button type="button" data-action="reject-request" data-id="${escapeHtml(req.id)}" class="danger-btn">Отклонить</button>
-            </div>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    els.departmentList.querySelectorAll('[data-action="rename-department"]').forEach(btn => {
-      btn.onclick = () => renameDepartment(btn.dataset.id);
-    });
-    els.departmentList.querySelectorAll('[data-action="archive-department"]').forEach(btn => {
-      btn.onclick = () => archiveDepartment(btn.dataset.id);
-    });
-    els.departmentList.querySelectorAll('[data-action="delete-department"]').forEach(btn => {
-      btn.onclick = () => deleteDepartment(btn.dataset.id);
-    });
-    els.departmentRequestsList.querySelectorAll('[data-action="approve-request"]').forEach(btn => {
-      btn.onclick = () => approveDepartmentRequest(btn.dataset.id);
-    });
-    els.departmentRequestsList.querySelectorAll('[data-action="reject-request"]').forEach(btn => {
-      btn.onclick = () => rejectDepartmentRequest(btn.dataset.id);
-    });
-  }
-
-  function renderAccessAdminModal() {
-    const branchGroups = getBranches().map(branch => ({
-      branch,
-      departments: getActiveDepartments(branch.id)
-    })).filter(group => group.departments.length > 0);
-
-    if (branchGroups.length === 0) {
-      els.accessInviteDepartments.innerHTML = '<div class=\"admin-card\">Сначала создайте хотя бы один отдел.</div>';
-      els.accessRequestDepartments.innerHTML = '<div class=\"admin-card\">Сначала создайте хотя бы один отдел.</div>';
-    } else {
-      const groupedCheckboxes = branchGroups.map(group => `
-        <div class=\"checkbox-group\">
-          <div class=\"checkbox-group-title\">${escapeHtml(group.branch.name)}</div>
-          ${group.departments.map(dep => `
-            <label class=\"checkbox-item\">
-              <input type=\"checkbox\" value=\"${escapeHtml(dep.id)}\">
-              <span>${escapeHtml(dep.name)}</span>
-            </label>
-          `).join('')}
-        </div>
-      `).join('');
-      els.accessInviteDepartments.innerHTML = groupedCheckboxes;
-      els.accessRequestDepartments.innerHTML = groupedCheckboxes;
-    }
-
-    const accessRequests = Object.values(adminAccessSnapshot.accessRequests || {})
-      .filter(Boolean)
-      .filter(req => (req.status || 'pending') === 'pending')
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-    els.accessRequestList.innerHTML = accessRequests.length === 0
-      ? '<div class=\"admin-card\">Новых запросов пока нет.</div>'
-      : accessRequests.map(req => `
-        <div class=\"admin-card\">
-          <div class=\"admin-card-header\">
-            <div>
-              <div class=\"admin-card-title\">${escapeHtml(req.email || 'Без email')}</div>
-              <div class=\"admin-card-meta\">${escapeHtml(req.name || 'Без имени')} · ${escapeHtml(formatDepartmentNames(req.requestedDepartmentIds || {}))}${req.comment ? ` · ${escapeHtml(req.comment)}` : ''}</div>
-            </div>
-            <div class=\"card-actions\">
-              <button type=\"button\" data-action=\"approve-access-request\" data-id=\"${escapeHtml(req.id)}\">Одобрить</button>
-              <button type=\"button\" data-action=\"reject-access-request\" data-id=\"${escapeHtml(req.id)}\" class=\"danger-btn\">Отклонить</button>
-            </div>
-          </div>
-        </div>
-      `).join('');
-
-    const invites = Object.values(adminAccessSnapshot.roleInvites || {}).filter(Boolean).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    els.accessInviteList.innerHTML = invites.length === 0
-      ? '<div class=\"admin-card\">Приглашений пока нет.</div>'
-      : invites.map(invite => `
-        <div class=\"admin-card\">
-          <div class=\"admin-card-header\">
-            <div>
-              <div class=\"admin-card-title\">${escapeHtml(invite.email || 'Без email')}</div>
-              <div class=\"admin-card-meta\">${escapeHtml((invite.role || 'manager') === 'manager' ? 'Руководитель' : invite.role)} · ${formatDepartmentNames(invite.departmentIds || {})}</div>
-            </div>
-            <div class=\"card-actions\">
-              <button type=\"button\" data-action=\"delete-invite\" data-id=\"${escapeHtml(invite.key || emailKey(invite.email || ''))}\" class=\"danger-btn\">Удалить</button>
-            </div>
-          </div>
-        </div>
-      `).join('');
-
-    const roles = Object.entries(adminAccessSnapshot.roles || {})
-      .map(([uid, role]) => ({ uid, ...role }))
-      .sort((a, b) => (a.email || '').localeCompare(b.email || '', 'ru'));
-
-    els.accessRoleList.innerHTML = roles.length === 0
-      ? '<div class=\"admin-card\">Ролей пока нет.</div>'
-      : roles.map(role => `
-        <div class=\"admin-card\">
-          <div class=\"admin-card-header\">
-            <div>
-              <div class=\"admin-card-title\">${escapeHtml(role.email || role.uid)}</div>
-              <div class=\"admin-card-meta\">${escapeHtml(roleLabel(role.role || 'viewer'))}${role.role === 'manager' ? ` · ${escapeHtml(formatDepartmentNames(role.departmentIds || {}))}` : ''}</div>
-            </div>
-            <div class=\"card-actions\">
-              ${role.role === 'manager' ? `<button type=\"button\" data-action=\"revoke-role\" data-id=\"${escapeHtml(role.uid)}\" class=\"danger-btn\">Снять доступ</button>` : ''}
-            </div>
-          </div>
-        </div>
-      `).join('');
-
-    els.accessRequestList.querySelectorAll('[data-action=\"approve-access-request\"]').forEach(btn => {
-      btn.onclick = () => approveAccessRequest(btn.dataset.id);
-    });
-    els.accessRequestList.querySelectorAll('[data-action=\"reject-access-request\"]').forEach(btn => {
-      btn.onclick = () => rejectAccessRequest(btn.dataset.id);
-    });
-    els.accessInviteList.querySelectorAll('[data-action=\"delete-invite\"]').forEach(btn => {
-      btn.onclick = () => deleteInvite(btn.dataset.id);
-    });
-    els.accessRoleList.querySelectorAll('[data-action=\"revoke-role\"]').forEach(btn => {
-      btn.onclick = () => revokeManagerRole(btn.dataset.id);
-    });
-  }
-
-  function formatDepartmentNames(departmentIdsObj) {
-    const ids = Object.keys(departmentIdsObj || {}).filter(id => departmentIdsObj[id] === true);
-    if (ids.length === 0) return 'Отделы не выбраны';
-    return ids.map(getDepartmentName).join(', ');
-  }
-
-  function validateVacation(vacation, skipId = '') {
-    if (!vacation.employeeId || !vacation.start || !vacation.end) return 'Заполните все обязательные поля';
-    if (vacation.end < vacation.start) return 'Дата окончания не может быть раньше даты начала';
-    if (!vacation.start.startsWith(`${YEAR}-`) || !vacation.end.startsWith(`${YEAR}-`)) return `Диапазон должен быть внутри ${YEAR} года`;
-
-    const employee = state.employees?.[vacation.employeeId];
-    if (!employee) return 'Сотрудник не найден';
-    if (!canManageEmployee(employee)) return 'Нет прав на этого сотрудника';
-
-    const overlap = Object.values(state.vacations || {}).find(item =>
-      item &&
-      item.employeeId === vacation.employeeId &&
-      item.id !== skipId &&
-      !(vacation.end < item.start || vacation.start > item.end)
-    );
-
-    if (overlap) return `Пересечение с существующим отпуском: ${formatTooltip(overlap)}`;
-    return '';
-  }
-
-  async function writeVacation(vacation) {
-    await set(ref(db, `scheduleV2/vacations/${vacation.id}`), vacation);
-  }
-
-  async function saveVacation() {
-    if (!canEditAnything()) {
-      alert('Недостаточно прав');
-      return;
-    }
-
-    const employee = state.employees?.[els.employeeSelect.value];
-    const existing = els.vacationId.value ? state.vacations?.[els.vacationId.value] : null;
-
-    const vacation = {
-      id: els.vacationId.value || makeId('vac', `${employee?.displayName || 'employee'}-${els.startDate.value}`),
-      employeeId: els.employeeSelect.value,
-      departmentId: employee?.departmentId || existing?.departmentId || '',
-      start: els.startDate.value,
-      end: els.endDate.value,
-      color: employee?.color || existing?.color || '#2d63dd',
-      status: els.vacationStatus.value,
-      comment: els.comment.value.trim(),
-      createdAt: existing?.createdAt || nowTs(),
-      updatedAt: nowTs(),
-      createdBy: existing?.createdBy || currentUser?.uid || 'unknown',
-      updatedBy: currentUser?.uid || 'unknown'
-    };
-
-    const error = validateVacation(vacation, els.vacationId.value);
-    if (error) {
-      alert(error);
-      return;
-    }
-
-    try {
-      await writeVacation(vacation);
-      closeVacationModal();
-    } catch (error) {
-      console.error('Ошибка сохранения отпуска:', error);
-      alert('Не удалось сохранить отпуск');
-    }
-  }
-
-  async function deleteVacation() {
-    const id = els.vacationId.value;
-    if (!id) return;
-    const existing = state.vacations?.[id];
-    if (!canManageVacation(existing)) {
-      alert('Недостаточно прав');
-      return;
-    }
-    if (!confirm('Удалить отпуск?')) return;
-
-    try {
-      await remove(ref(db, `scheduleV2/vacations/${id}`));
-      closeVacationModal();
-    } catch (error) {
-      console.error('Ошибка удаления отпуска:', error);
-      alert('Не удалось удалить отпуск');
-    }
-  }
-
-  async function resetAllVacations() {
-    if (!canResetAll()) {
-      alert('Недостаточно прав');
-      return;
-    }
-    if (!confirm('Удалить все отпуска во всех филиалах?')) return;
-    try {
-      await set(ref(db, 'scheduleV2/vacations'), {});
-    } catch (error) {
-      console.error('Ошибка сброса отпусков:', error);
-      alert('Не удалось сбросить отпуска');
-    }
-  }
-
-  async function addEmployee() {
-    if (!canEditAnything()) {
-      alert('Недостаточно прав');
-      return;
-    }
-
-    const departmentId = els.employeeDepartmentSelect.value;
-    const displayName = normalizeFullName(els.newEmployeeName.value);
-    const position = String(els.newEmployeePosition.value || '').trim().replace(/\s+/g, ' ');
-    const department = state.departments?.[departmentId];
-
-    if (!departmentId || !displayName) {
-      alert('Укажите отдел и ФИО сотрудника');
-      return;
-    }
-    if (!department) {
-      alert('Отдел не найден');
-      return;
-    }
-    if (!canManageDepartment(departmentId)) {
-      alert('Недостаточно прав для этого отдела');
-      return;
-    }
-
-    const duplicate = getEmployees({ departmentId }).some(emp => normalizeText(emp.displayName) === normalizeText(displayName));
-    if (duplicate) {
-      alert('Такой сотрудник уже есть в выбранном отделе');
-      return;
-    }
-
-    const employeeId = makeId('emp', `${department.name}-${displayName}`);
-    const employee = {
-      id: employeeId,
-      displayName,
-      position,
-      departmentId,
-      color: els.newEmployeeColor.value || defaultEmployeeColor(`${departmentId}-${displayName}`),
-      isActive: true,
-      createdAt: nowTs(),
-      createdBy: currentUser?.uid || 'unknown'
-    };
-
-    try {
-      await set(ref(db, `scheduleV2/employees/${employeeId}`), employee);
-      closeEmployeeModal();
-      els.newEmployeePosition.value = '';
-    } catch (error) {
-      console.error('Ошибка добавления сотрудника:', error);
-      alert('Не удалось добавить сотрудника');
-    }
-  }
-
-  async function removeEmployee() {
-    const employeeId = els.removeEmployeeSelect.value;
-    const employee = state.employees?.[employeeId];
-    if (!employee) {
-      alert('Сотрудник не найден');
-      return;
-    }
-    if (!canManageEmployee(employee)) {
-      alert('Недостаточно прав');
-      return;
-    }
-    if (!confirm(`Удалить сотрудника "${employee.displayName}" и все его отпуска?`)) return;
-
-    const updates = {
-      [`scheduleV2/employees/${employeeId}`]: null
-    };
-
-    Object.values(state.vacations || {}).forEach(vac => {
-      if (vac && vac.employeeId === employeeId) {
-        updates[`scheduleV2/vacations/${vac.id}`] = null;
-      }
-    });
-
-    try {
-      await update(ref(db), updates);
-      closeRemoveEmployeeModal();
-    } catch (error) {
-      console.error('Ошибка удаления сотрудника:', error);
-      alert('Не удалось удалить сотрудника');
-    }
-  }
-
-  async function createDepartmentDirect() {
-    if (!isAdmin()) return;
-    const branchId = els.adminDepartmentBranchSelect.value;
-    const name = els.adminDepartmentName.value.trim().replace(/\s+/g, ' ');
-    els.adminDepartmentError.textContent = '';
-
-    if (!branchId || !name) {
-      els.adminDepartmentError.textContent = 'Выберите филиал и введите название отдела';
-      return;
-    }
-
-    const exists = Object.values(state.departments || {}).some(dep => dep && dep.branchId === branchId && normalizeText(dep.name) === normalizeText(name) && dep.status !== 'archived');
-    if (exists) {
-      els.adminDepartmentError.textContent = 'Такой отдел уже существует в выбранном филиале';
-      return;
-    }
-
-    const departmentId = makeId('dep', `${branchId}-${name}`);
-    const department = {
-      id: departmentId,
-      name,
-      branchId,
-      status: 'active',
-      createdAt: nowTs(),
-      createdBy: currentUser?.uid || 'unknown'
-    };
-
-    try {
-      await set(ref(db, `scheduleV2/departments/${departmentId}`), department);
-      els.adminDepartmentName.value = '';
-      renderFilters();
-    } catch (error) {
-      console.error('Ошибка создания отдела:', error);
-      els.adminDepartmentError.textContent = 'Не удалось создать отдел';
-    }
-  }
-
-  async function renameDepartment(departmentId) {
-    if (!isAdmin()) return;
-    const department = state.departments?.[departmentId];
-    if (!department) return;
-
-    const nextName = prompt('Новое название отдела', department.name);
-    if (!nextName) return;
-    const normalized = nextName.trim().replace(/\s+/g, ' ');
-    if (!normalized) return;
-
-    try {
-      await update(ref(db, `scheduleV2/departments/${departmentId}`), {
-        name: normalized,
-        updatedAt: nowTs(),
-        updatedBy: currentUser?.uid || 'unknown'
+        `);
       });
-    } catch (error) {
-      console.error('Ошибка переименования отдела:', error);
-      alert('Не удалось переименовать отдел');
-    }
-  }
 
-  async function archiveDepartment(departmentId) {
-    if (!isAdmin()) return;
-    const department = state.departments?.[departmentId];
-    if (!department) return;
-    const hasEmployees = getEmployees({ departmentId }).length > 0;
-    if (hasEmployees) {
-      alert('Сначала переместите или удалите сотрудников из отдела');
-      return;
+      if (todayX !== null) html.push(`<div class="timeline-today-overlay" style="left:calc(var(--left-col) + ${todayX}px)"></div>`);
+      els.table.innerHTML = html.join('');
+      bindTimelineEvents();
     }
-    if (!confirm(`Архивировать отдел "${department.name}"?`)) return;
 
-    try {
-      await update(ref(db, `scheduleV2/departments/${departmentId}`), {
-        status: 'archived',
-        updatedAt: nowTs(),
-        updatedBy: currentUser?.uid || 'unknown'
+    function render(){ syncControls(); renderTimeline(); }
+
+    function bindTimelineEvents(){
+      document.querySelectorAll('.vacation').forEach(bar => {
+        bar.addEventListener('mouseenter', event => {
+          const data = JSON.parse(bar.dataset.tip);
+          els.tooltip.innerHTML = `
+            <div class="tooltip-title">${escapeHTML(data.employee)}</div>
+            <div class="tooltip-sub">${escapeHTML(data.dept)} · ${escapeHTML(data.status)} · ${escapeHTML(data.type || 'Основной')}</div>
+            <div class="tooltip-row"><span>Период</span><strong>${escapeHTML(data.period)}</strong></div>
+            <div class="tooltip-row"><span>Календарных</span><strong>${data.days}</strong></div>
+            <div class="tooltip-row"><span>Рабочих</span><strong>${data.workDays}</strong></div>
+            <div class="tooltip-sub">${data.conflict ? 'Есть пересечение внутри отдела.' : escapeHTML(data.note)}</div>
+          `;
+          els.tooltip.classList.add('show'); moveTooltip(event);
+        });
+        bar.addEventListener('mousemove', moveTooltip);
+        bar.addEventListener('mouseleave', () => els.tooltip.classList.remove('show'));
+        bar.addEventListener('click', () => openVacationDetails(bar.dataset.vacation, bar.dataset.deptContext));
       });
-    } catch (error) {
-      console.error('Ошибка архивации отдела:', error);
-      alert('Не удалось архивировать отдел');
+      document.querySelectorAll('[data-edit-employee]').forEach(btn => btn.addEventListener('click', () => openEmployeeModal(btn.dataset.editEmployee)));
+      document.querySelectorAll('[data-toggle-dept]').forEach(btn => btn.addEventListener('click', () => {
+        const dept = btn.dataset.toggleDept; state.collapsed[dept] = !state.collapsed[dept]; saveState(); renderTimeline();
+      }));
+      document.querySelectorAll('.track-wrap').forEach(track => {
+        track.addEventListener('mousedown', event => {
+          if (event.button !== 0) return;
+          if (event.target.closest('.vacation')) return;
+          event.preventDefault();
+          startSelection(track, event);
+        });
+        track.addEventListener('mousemove', event => { if (drag.active) updateSelection(track, event); });
+        track.addEventListener('click', event => {
+          if (event.target.closest('.vacation')) return;
+          if (drag.justFinished) { drag.justFinished = false; return; }
+        });
+      });
     }
-  }
 
-  async function deleteDepartment(departmentId) {
-    if (!isAdmin()) return;
-    await loadAdminAccessData();
-    const department = state.departments?.[departmentId];
-    if (!department) return;
+    function moveTooltip(event){ els.tooltip.style.left = `${event.clientX}px`; els.tooltip.style.top = `${event.clientY}px`; }
 
-    const hasEmployees = getEmployees({ departmentId }).length > 0;
-    const hasVacations = Object.values(state.vacations || {}).some(vac => vac && vac.departmentId === departmentId);
-    if (hasEmployees || hasVacations) {
-      alert('Нельзя удалить отдел, пока в нем есть сотрудники или отпуска');
-      return;
+    let drag = { active:false, employeeId:null, dept:null, start:null, end:null, track:null, justFinished:false };
+    function pointInTrack(track, event){
+      const rect = track.getBoundingClientRect();
+      const x = Math.max(0, Math.min(timelineWidth()-1, event.clientX - rect.left));
+      return { x, date: dateFromX(x) };
     }
-    if (!confirm(`Удалить отдел "${department.name}" без возможности восстановления?`)) return;
-
-    const updates = {
-      [`scheduleV2/departments/${departmentId}`]: null
-    };
-
-    Object.entries(adminAccessSnapshot.roleInvites || {}).forEach(([key, invite]) => {
-      if (invite?.departmentIds?.[departmentId]) {
-        const next = { ...(invite.departmentIds || {}) };
-        delete next[departmentId];
-        if (Object.keys(next).length === 0) updates[`roleInvites/${key}`] = null;
-        else updates[`roleInvites/${key}/departmentIds`] = next;
-      }
+    function startSelection(track, event){
+      const p = pointInTrack(track, event);
+      drag = {
+        active: true,
+        employeeId: track.dataset.trackEmployee,
+        dept: track.dataset.trackDept,
+        start: p.date,
+        end: p.date,
+        track,
+        justFinished: false
+      };
+      showSelection();
+    }
+    function updateSelection(track, event){
+      if (!drag.active || drag.track !== track) return;
+      const p = pointInTrack(track, event);
+      drag.end = p.date;
+      showSelection();
+    }
+    function showSelection(){
+      if (!drag.active || !drag.track) return;
+      const selector = drag.track.querySelector('.drag-selection');
+      if (!selector) return;
+      const start = drag.start <= drag.end ? drag.start : drag.end;
+      const end = drag.start <= drag.end ? drag.end : drag.start;
+      selector.style.left = `${xForDate(start)}px`;
+      selector.style.width = `${rawWidth(start, end)}px`;
+      selector.classList.add('show');
+    }
+    function hideSelection(){
+      if (!drag.track) return;
+      const selector = drag.track.querySelector('.drag-selection');
+      if (selector) selector.classList.remove('show');
+    }
+    document.addEventListener('mouseup', event => {
+      if (!drag.active) return;
+      const employeeId = drag.employeeId;
+      const start = drag.start <= drag.end ? drag.start : drag.end;
+      const end = drag.start <= drag.end ? drag.end : drag.start;
+      hideSelection();
+      drag.active = false;
+      drag.justFinished = true;
+      const endDate = new Date(end);
+      if (start.getTime() === end.getTime()) endDate.setDate(endDate.getDate()+6);
+      openVacationModal(null, { employeeId, start: formatISO(start), end: formatISO(endDate) });
+      setTimeout(() => { drag.justFinished = false; }, 80);
     });
 
-    Object.entries(adminAccessSnapshot.roles || {}).forEach(([uid, role]) => {
-      if (role?.departmentIds?.[departmentId]) {
-        const next = { ...(role.departmentIds || {}) };
-        delete next[departmentId];
-        if (Object.keys(next).length === 0 && role.role === 'manager') updates[`roles/${uid}`] = null;
-        else updates[`roles/${uid}/departmentIds`] = next;
+    function openVacationDetails(id, deptContext){
+      const vacation = state.vacations.find(v => v.id === id); if (!vacation) return;
+      const employee = getEmployee(vacation.employeeId);
+      if (!employee) return toast('Сотрудник для этого отпуска не найден');
+      const context = deptContext || employee.dept;
+      const conflicts = overlapsFor(vacation, context);
+      const stats = employeeStats(employee.id);
+      const vis = visualStatus(vacation);
+      $('sideTitle').textContent = 'Отпуск';
+      $('sideSub').textContent = `${employee.name} · ${context === '__manager__' ? 'Руководитель' : context}`;
+      const employeeOptions = state.employees.map(e => `<option value="${e.id}" ${e.id === vacation.employeeId ? 'selected' : ''}>${escapeHTML(e.name)} · ${escapeHTML(e.role === 'manager' ? 'Руководитель' : e.dept)}</option>`).join('');
+      $('sideBody').innerHTML = `
+        <form id="sideVacationForm" class="form">
+          <input type="hidden" id="sideVacationId" value="${vacation.id}">
+          <div class="form-field">
+            <label for="sideVacationEmployee">Сотрудник</label>
+            <select id="sideVacationEmployee">${employeeOptions}</select>
+          </div>
+          <div class="form-row">
+            <div class="form-field"><label for="sideVacationStart">Начало</label><input id="sideVacationStart" type="date" value="${vacation.start}" required></div>
+            <div class="form-field"><label for="sideVacationEnd">Окончание</label><input id="sideVacationEnd" type="date" value="${vacation.end}" required></div>
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label for="sideVacationStatus">Статус</label>
+              <select id="sideVacationStatus">
+                <option value="planned" ${normalizeStatus(vacation.status) === 'planned' ? 'selected' : ''}>Запланировано</option>
+                <option value="approved" ${normalizeStatus(vacation.status) === 'approved' ? 'selected' : ''}>Утверждено</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label for="sideVacationType">Тип отпуска</label>
+              <select id="sideVacationType">
+                <option value="main" ${vacationType(vacation) === 'main' ? 'selected' : ''}>Основной</option>
+                <option value="extra" ${vacationType(vacation) === 'extra' ? 'selected' : ''}>Дополнительный</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-field">
+            <label for="sideVacationNote">Комментарий</label>
+            <textarea id="sideVacationNote" placeholder="Например: поездка, перенос периода, важная причина">${escapeHTML(vacation.note || '')}</textarea>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-card"><div class="detail-label">Текущий статус</div><div class="detail-value"><span class="status-badge ${vis}">${statusText[vis]}</span></div></div>
+            <div class="detail-card"><div class="detail-label">Дни в ${state.year}</div><div class="detail-value">${vacationDaysInYear(vacation)} календарных · ${workingDaysInVacationYear(vacation)} рабочих</div></div>
+            <div class="detail-card"><div class="detail-label">Баланс ${state.year}</div><div class="detail-value">${escapeHTML(balanceLabel(stats))}</div></div>
+          </div>
+          <div class="form-actions">
+            <button id="sideDeleteVacationBtn" class="danger-lite visible" type="button">Удалить</button>
+            <div class="form-actions-right">
+              <button id="sideCancelVacationBtn" class="ghost" type="button">Отмена</button>
+              <button class="primary" type="submit">Сохранить</button>
+            </div>
+          </div>
+        </form>
+        <div class="section-title">Пересечения</div>
+        ${conflicts.length ? conflicts.map(item => `
+          <div class="issue critical">
+            <div class="issue-title">${escapeHTML(item.otherEmployee.name)}</div>
+            <div class="issue-text">${dateLabel(formatISO(item.start))} — ${dateLabel(formatISO(item.end))}, ${Math.round((item.end-item.start)/MS_DAY)+1} дн.</div>
+            <button class="action-btn primary-lite" data-allow="${vacation.id}:${item.other.id}" style="margin-top:8px;">Отметить допустимым</button>
+          </div>`).join('') : `<div class="issue"><div class="issue-title">Пересечений нет</div><div class="issue-text">В этом отделе нет пересекающихся отпусков.</div></div>`}
+      `;
+      els.sidePanel.classList.add('open'); bindSideEvents();
+    }
+    function bindSideEvents(){
+      const sideForm = $('sideVacationForm');
+      if (sideForm) {
+        sideForm.addEventListener('submit', event => {
+          event.preventDefault();
+          const id = $('sideVacationId').value;
+          const v = state.vacations.find(item => item.id === id);
+          if (!v) return;
+          const payload = vacationPayloadFromForm('sideVacation');
+          const error = validateVacationPayload(payload, id);
+          if (error) return toast(error);
+          if (didVacationPeriodChange(v, payload)) removeAllowedConflictsFor(id);
+          Object.assign(v, payload);
+          cleanupAllowedConflicts();
+          saveState();
+          render();
+          openVacationDetails(id, getEmployee(v.employeeId)?.dept);
+          toast('Отпуск сохранён');
+        });
       }
-    });
-
-    Object.entries(adminAccessSnapshot.accessRequests || {}).forEach(([id, req]) => {
-      if (req?.requestedDepartmentIds?.[departmentId]) {
-        const next = { ...(req.requestedDepartmentIds || {}) };
-        delete next[departmentId];
-        if (Object.keys(next).length === 0) updates[`accessRequests/${id}`] = null;
-        else updates[`accessRequests/${id}/requestedDepartmentIds`] = next;
-      }
-    });
-
-    try {
-      await update(ref(db), updates);
-      await loadAdminAccessData();
-      renderFilters();
-      renderDepartmentAdminModal();
-      alert('Отдел удален');
-    } catch (error) {
-      console.error('Ошибка удаления отдела:', error);
-      alert('Не удалось удалить отдел');
+      const cancel = $('sideCancelVacationBtn');
+      if (cancel) cancel.addEventListener('click', () => closeSidePanel());
+      const del = $('sideDeleteVacationBtn');
+      if (del) del.addEventListener('click', () => {
+        const id = $('sideVacationId').value;
+        if (!confirm('Удалить отпуск?\nЭто действие нельзя отменить.')) return;
+        removeAllowedConflictsFor(id);
+        state.vacations = state.vacations.filter(v => v.id !== id);
+        saveState(); render(); closeSidePanel(); toast('Отпуск удалён');
+      });
+      document.querySelectorAll('[data-allow]').forEach(btn => btn.addEventListener('click', () => {
+        const [a,b] = btn.dataset.allow.split(':'); const key = conflictKey(a,b); if (!state.allowedConflicts.includes(key)) state.allowedConflicts.push(key);
+        saveState(); render(); toast('Пересечение отмечено допустимым'); const v = state.vacations.find(item => item.id === a); if (v) openVacationDetails(a, getEmployee(v.employeeId)?.dept);
+      }));
     }
-  }
+    function closeSidePanel(){ els.sidePanel.classList.remove('open'); }
 
-  async function saveDepartmentRequest() {
-    if (!currentUser) {
-      openAuthModal();
-      return;
+    function defaultVacationRange(){
+      const today = new Date();
+      let start = today.getFullYear() === state.year ? new Date(today.getFullYear(), today.getMonth(), today.getDate()) : yearStart(state.year);
+      if (start > yearEnd(state.year)) start = yearStart(state.year);
+      while (start.getDay() === 0 || start.getDay() === 6) start.setDate(start.getDate()+1);
+      const end = new Date(start);
+      end.setDate(end.getDate()+13);
+      if (end > yearEnd(state.year)) end.setTime(yearEnd(state.year).getTime());
+      return { start: formatISO(start), end: formatISO(end) };
     }
-
-    const requestedName = els.departmentRequestName.value.trim().replace(/\s+/g, ' ');
-    const branchId = getCurrentBranchId();
-    els.departmentRequestError.textContent = '';
-
-    if (!requestedName) {
-      els.departmentRequestError.textContent = 'Введите название отдела';
-      return;
-    }
-
-    const exists = getActiveDepartments(branchId).some(dep => normalizeText(dep.name) === normalizeText(requestedName));
-    if (exists) {
-      els.departmentRequestError.textContent = 'Такой отдел уже есть в этом филиале';
-      return;
-    }
-
-    const requestId = makeId('req', `${branchId}-${requestedName}`);
-    const requestData = {
-      id: requestId,
-      branchId,
-      requestedName,
-      normalizedName: normalizeText(requestedName),
-      status: 'pending',
-      requestedBy: currentUser?.uid || 'unknown',
-      requestedByEmail: currentUser?.email || '',
-      createdAt: nowTs()
-    };
-
-    try {
-      await set(ref(db, `scheduleV2/departmentRequests/${requestId}`), requestData);
-      closeDepartmentRequestModal();
-      alert('Заявка отправлена');
-    } catch (error) {
-      console.error('Ошибка создания заявки:', error);
-      els.departmentRequestError.textContent = 'Не удалось отправить заявку';
-    }
-  }
-
-  async function approveDepartmentRequest(requestId) {
-    if (!isAdmin()) return;
-    const requestData = state.departmentRequests?.[requestId];
-    if (!requestData) return;
-
-    const duplicate = getActiveDepartments(requestData.branchId).some(dep => normalizeText(dep.name) === normalizeText(requestData.requestedName));
-    const updates = {};
-    if (!duplicate) {
-      const departmentId = makeId('dep', `${requestData.branchId}-${requestData.requestedName}`);
-      updates[`scheduleV2/departments/${departmentId}`] = {
-        id: departmentId,
-        name: requestData.requestedName,
-        branchId: requestData.branchId,
-        status: 'active',
-        createdAt: nowTs(),
-        createdBy: currentUser?.uid || 'unknown',
-        sourceRequestId: requestId
+    function vacationPayloadFromForm(prefix = 'vacation'){
+      return {
+        employeeId: $(`${prefix}Employee`).value,
+        start: $(`${prefix}Start`).value,
+        end: $(`${prefix}End`).value,
+        status: normalizeStatus($(`${prefix}Status`).value),
+        type: $(`${prefix}Type`).value === 'extra' ? 'extra' : 'main',
+        note: $(`${prefix}Note`).value.trim()
       };
     }
-    updates[`scheduleV2/departmentRequests/${requestId}`] = null;
-
-    try {
-      await update(ref(db), updates);
-      delete state.departmentRequests[requestId];
-      renderFilters();
-      renderDepartmentAdminModal();
-    } catch (error) {
-      console.error('Ошибка одобрения заявки:', error);
-      alert('Не удалось одобрить заявку');
+    function validateVacationPayload(payload, currentId = null){
+      if (!getEmployee(payload.employeeId)) return 'Сначала выберите существующего сотрудника';
+      if (!isValidDateISO(payload.start) || !isValidDateISO(payload.end)) return 'Укажите корректные даты отпуска';
+      if (parseDate(payload.end) < parseDate(payload.start)) return 'Дата окончания не может быть раньше начала';
+      const duplicate = state.vacations.some(v =>
+        v.id !== currentId &&
+        v.employeeId === payload.employeeId &&
+        v.start === payload.start &&
+        v.end === payload.end &&
+        vacationType(v) === payload.type
+      );
+      return duplicate ? 'Такой отпуск у сотрудника уже есть' : '';
     }
-  }
-
-  async function rejectDepartmentRequest(requestId) {
-    if (!isAdmin()) return;
-    if (!confirm('Отклонить заявку?')) return;
-    try {
-      await remove(ref(db, `scheduleV2/departmentRequests/${requestId}`));
-      delete state.departmentRequests[requestId];
-      renderDepartmentAdminModal();
-    } catch (error) {
-      console.error('Ошибка отклонения заявки:', error);
-      alert('Не удалось отклонить заявку');
+    function didVacationPeriodChange(vacation, payload){
+      return vacation.employeeId !== payload.employeeId || vacation.start !== payload.start || vacation.end !== payload.end;
     }
-  }
-
-  function renderDepartmentCheckboxGroups(container, selectedIds = []) {
-    const selected = new Set(selectedIds);
-    const branchGroups = getBranches().map(branch => ({
-      branch,
-      departments: getActiveDepartments(branch.id)
-    })).filter(group => group.departments.length > 0);
-
-    if (branchGroups.length === 0) {
-      container.innerHTML = '<div class="admin-card">Сначала создайте хотя бы один отдел.</div>';
-      return;
+    function openOwnVacation(){
+      const employee = employeesForCurrentView()[0];
+      if (!employee) {
+        toast(viewDepartments().length ? 'Сначала добавьте сотрудника в выбранный отдел' : 'Сначала выберите отдел');
+        if (!viewDepartments().length) openDepartmentPicker(); else openEmployeeModal();
+        return;
+      }
+      openVacationModal(null, { employeeId: employee.id, ...defaultVacationRange(), status:'planned' });
     }
-
-    container.innerHTML = branchGroups.map(group => `
-      <div class="checkbox-group">
-        <div class="checkbox-group-title">${escapeHtml(group.branch.name)}</div>
-        ${group.departments.map(dep => `
-          <label class="checkbox-item">
-            <input type="checkbox" value="${escapeHtml(dep.id)}" ${selected.has(dep.id) ? 'checked' : ''}>
-            <span>${escapeHtml(dep.name)}</span>
-          </label>
-        `).join('')}
-      </div>
-    `).join('');
-  }
-
-  function openAccessRequestModal() {
-    els.accessRequestError.textContent = '';
-    els.accessRequestEmail.value = currentUser?.email || '';
-    els.accessRequestName.value = currentRoleRecord?.fullName || '';
-    els.accessRequestComment.value = '';
-    renderDepartmentCheckboxGroups(els.accessRequestDepartments);
-    els.accessRequestModalBackdrop.classList.add('open');
-  }
-
-  function closeAccessRequestModal() {
-    els.accessRequestModalBackdrop.classList.remove('open');
-  }
-
-  function getAccessRequestDepartmentValues() {
-    return Array.from(els.accessRequestDepartments.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
-  }
-
-  async function saveAccessRequest() {
-    const email = normalizeEmail(els.accessRequestEmail.value);
-    const name = normalizeFullName(els.accessRequestName.value);
-    const comment = els.accessRequestComment.value.trim();
-    const departmentIds = getAccessRequestDepartmentValues();
-
-    els.accessRequestError.textContent = '';
-    if (!email) {
-      els.accessRequestError.textContent = 'Введите email';
-      return;
+    function openVacationModal(id = null, preset = {}){
+      if (!viewDepartments().length) {
+        toast('Сначала выберите отдел');
+        openDepartmentPicker();
+        return;
+      }
+      if (!employeesForCurrentView().length) {
+        toast('Сначала добавьте сотрудника в выбранный отдел');
+        openEmployeeModal();
+        return;
+      }
+      const defaults = defaultVacationRange();
+      $('vacationForm').reset(); $('vacationId').value = ''; $('vacationModalTitle').textContent = 'Добавить отпуск';
+      $('vacationEmployee').value = preset.employeeId || employeesForCurrentView()[0]?.id || '';
+      $('vacationStart').value = preset.start || defaults.start;
+      $('vacationEnd').value = preset.end || defaults.end;
+      $('vacationStatus').value = preset.status || 'planned'; $('vacationType').value = preset.type || 'main'; $('vacationNote').value = ''; $('deleteVacationBtn').classList.remove('visible');
+      if (id) {
+        const v = state.vacations.find(item => item.id === id); if (!v) return;
+        $('vacationModalTitle').textContent = 'Редактировать отпуск'; $('vacationId').value = v.id; $('vacationEmployee').value = v.employeeId;
+        $('vacationStart').value = v.start; $('vacationEnd').value = v.end; $('vacationStatus').value = normalizeStatus(v.status); $('vacationType').value = vacationType(v); $('vacationNote').value = v.note || ''; $('deleteVacationBtn').classList.add('visible');
+      }
+      openModal(els.vacationModal);
     }
-    if (!isLikelyFullName(name)) {
-      els.accessRequestError.textContent = 'Укажите полное имя';
-      return;
+    function saveVacation(event){
+      event.preventDefault();
+      const id = $('vacationId').value;
+      const payload = vacationPayloadFromForm('vacation');
+      const error = validateVacationPayload(payload, id || null);
+      if (error) return toast(error);
+      if (id) {
+        const vacation = state.vacations.find(v => v.id === id);
+        if (!vacation) return toast('Отпуск не найден');
+        if (didVacationPeriodChange(vacation, payload)) removeAllowedConflictsFor(id);
+        Object.assign(vacation, payload);
+        toast('Отпуск обновлён');
+      }
+      else {
+        state.vacations.push({ id: uid('v'), ...payload });
+        toast('Отпуск добавлен');
+      }
+      cleanupAllowedConflicts();
+      saveState(); render(); closeModal(els.vacationModal);
     }
-    if (departmentIds.length === 0) {
-      els.accessRequestError.textContent = 'Выберите хотя бы один отдел';
-      return;
+    function deleteVacation(){
+      const id = $('vacationId').value; if (!id) return; if (!confirm('Удалить отпуск?\nЭто действие нельзя отменить.')) return;
+      removeAllowedConflictsFor(id);
+      state.vacations = state.vacations.filter(v => v.id !== id); saveState(); render(); closeModal(els.vacationModal); closeSidePanel(); toast('Отпуск удалён');
     }
 
-    const requestId = makeId('access_req', email);
-    const requestData = {
-      id: requestId,
-      email,
-      name,
-      comment,
-      status: 'pending',
-      requestedDepartmentIds: Object.fromEntries(departmentIds.map(id => [id, true])),
-      createdAt: nowTs(),
-      requestedByUid: currentUser?.uid || null
-    };
-
-    try {
-      await set(ref(db, `accessRequests/${requestId}`), requestData);
-      if (!adminAccessSnapshot.accessRequests) adminAccessSnapshot.accessRequests = {};
-      adminAccessSnapshot.accessRequests[requestId] = requestData;
-      closeAccessRequestModal();
-      alert('Запрос отправлен администратору');
-    } catch (error) {
-      console.error('Ошибка отправки запроса доступа:', error);
-      els.accessRequestError.textContent = 'Не удалось отправить запрос';
+    function addDepartment(){
+      const entered = prompt('Введите название отдела');
+      if (entered === null) return;
+      const name = entered.trim();
+      if (!name) return toast('Введите название отдела');
+      const existing = allDepartments().find(dept => normalized(dept) === normalized(name));
+      const dept = existing || ensureDepartment(name);
+      state.viewDepts = [dept];
+      saveState();
+      render();
+      toast(existing ? 'Отдел выбран' : 'Отдел добавлен');
     }
-  }
+    function deleteDepartment(){
+      const departments = allDepartments();
+      if (!departments.length) return toast('Нет отделов для удаления');
+      const current = viewDepartments()[0] || departments[0];
+      const entered = prompt(`Введите название отдела для удаления:\n\n${departments.join('\n')}`, current);
+      if (entered === null) return;
+      const dept = departments.find(item => normalized(item) === normalized(entered));
+      if (!dept) return toast('Такой отдел не найден');
 
-  async function approveAccessRequest(requestId) {
-    if (!isAdmin()) return;
-    const req = adminAccessSnapshot.accessRequests?.[requestId];
-    if (!req) return;
-    const departmentIds = req.requestedDepartmentIds || {};
-    if (Object.keys(departmentIds).length === 0) {
-      alert('В запросе не выбраны отделы');
-      return;
+      const employeeIds = new Set(state.employees.filter(e => normalized(e.dept) === normalized(dept)).map(e => e.id));
+      const vacationCount = state.vacations.filter(v => employeeIds.has(v.employeeId)).length;
+      const employeeCount = employeeIds.size;
+      if (!confirm(`Удалить отдел "${dept}"?\nБудет удалено сотрудников: ${employeeCount}, отпусков: ${vacationCount}.\nЭто действие нельзя отменить.`)) return;
+
+      state.departments = (state.departments || []).filter(item => normalized(item) !== normalized(dept));
+      state.employees = state.employees.filter(e => !employeeIds.has(e.id));
+      state.vacations = state.vacations.filter(v => !employeeIds.has(v.employeeId));
+      delete state.managers[dept];
+      delete state.collapsed[dept];
+      state.viewDepts = viewDepartments().filter(item => normalized(item) !== normalized(dept));
+      if (state.profile?.employeeId && employeeIds.has(state.profile.employeeId)) {
+        state.profile = null;
+      } else if (state.profile?.depts) {
+        state.profile.depts = state.profile.depts.filter(item => normalized(item) !== normalized(dept));
+        if (state.profile.dept && normalized(state.profile.dept) === normalized(dept)) state.profile.dept = state.profile.depts[0] || '';
+        if (state.profile.role === 'manager' && !state.profile.depts.length) state.profile = null;
+      }
+      cleanupAllowedConflicts();
+      saveState();
+      render();
+      closeSidePanel();
+      toast('Отдел удалён');
     }
 
-    const key = emailKey(req.email || '');
-    const updates = {
-      [`roleInvites/${key}`]: {
-        key,
-        email: req.email,
-        role: 'manager',
-        departmentIds,
-        isActive: true,
-        createdAt: nowTs(),
-        createdBy: currentUser?.uid || 'unknown',
-        sourceRequestId: requestId,
-        fullName: req.name || ''
-      },
-      [`accessRequests/${requestId}/status`]: 'approved',
-      [`accessRequests/${requestId}/resolvedAt`]: nowTs(),
-      [`accessRequests/${requestId}/resolvedBy`]: currentUser?.uid || 'unknown'
-    };
-
-    try {
-      await update(ref(db), updates);
-      await loadAdminAccessData();
-      renderAccessAdminModal();
-    } catch (error) {
-      console.error('Ошибка одобрения запроса доступа:', error);
-      alert('Не удалось одобрить запрос');
+    function openEmployeeModal(id = null){
+      $('employeeForm').reset();
+      $('employeeId').value = '';
+      $('employeeModalTitle').textContent = 'Добавить сотрудника';
+      $('employeeRole').value = 'staff';
+      $('deleteEmployeeBtn').classList.remove('visible');
+      renderEmployeeDeptOptions(viewDepartments()[0] || allDepartments()[0] || '');
+      if (id) {
+        const e = getEmployee(id);
+        if (!e) return;
+        $('employeeModalTitle').textContent = 'Редактировать сотрудника';
+        $('employeeId').value = e.id;
+        $('employeeName').value = e.name;
+        renderEmployeeDeptOptions(e.dept);
+        $('employeeRole').value = e.role === 'manager' ? 'manager' : 'staff';
+        $('employeePosition').value = e.position || (e.role === 'manager' ? 'Руководитель отдела' : 'Сотрудник');
+        $('employeeInitials').value = e.initials;
+        $('deleteEmployeeBtn').classList.add('visible');
+      }
+      openModal(els.employeeModal);
     }
-  }
-
-  async function rejectAccessRequest(requestId) {
-    if (!isAdmin()) return;
-    if (!confirm('Отклонить запрос на доступ?')) return;
-    try {
-      await update(ref(db, `accessRequests/${requestId}`), {
-        status: 'rejected',
-        resolvedAt: nowTs(),
-        resolvedBy: currentUser?.uid || 'unknown'
+    function saveEmployee(event){
+      event.preventDefault();
+      const id = $('employeeId').value;
+      const existing = id ? getEmployee(id) : null;
+      const role = $('employeeRole').value === 'manager' ? 'manager' : 'staff';
+      const payload = { name: $('employeeName').value.trim(), dept: $('employeeDept').value.trim(), position: $('employeePosition').value.trim(), initials: $('employeeInitials').value.trim().toUpperCase(), role };
+      if (!payload.name || !payload.dept || !payload.position || !payload.initials) return toast('Заполните все поля сотрудника');
+      const duplicate = state.employees.some(e => e.id !== id && normalized(e.name) === normalized(payload.name) && normalized(e.dept) === normalized(payload.dept));
+      if (duplicate) return toast('Такой сотрудник уже есть в этом отделе');
+      ensureDepartment(payload.dept);
+      if (id && existing) {
+        const previousDept = existing.dept;
+        const wasManager = existing.role === 'manager' || state.managers?.[previousDept] === id;
+        Object.assign(existing, payload);
+        if (wasManager && previousDept !== payload.dept && state.managers?.[previousDept] === id) state.managers[previousDept] = null;
+        if (role === 'manager') {
+          setDepartmentManager(payload.dept, id);
+        } else {
+          clearManagerLinks(id);
+        }
+        if (state.profile?.employeeId === id) {
+          state.profile.name = payload.name;
+          state.profile.dept = payload.dept;
+          state.profile.role = role === 'manager' ? 'manager' : 'employee';
+          state.profile.depts = [payload.dept];
+        }
+      } else {
+        const employee = { id: uid('e'), ...payload };
+        state.employees.push(employee);
+        if (role === 'manager') setDepartmentManager(payload.dept, employee.id);
+      }
+      if (!viewDepartments().some(dept => normalized(dept) === normalized(payload.dept))) state.viewDepts = [payload.dept];
+      saveState(); render(); closeModal(els.employeeModal); toast(id ? 'Сотрудник обновлён' : 'Сотрудник добавлен');
+    }
+    function deleteEmployee(){
+      const id = $('employeeId').value; if (!id) return; const e = getEmployee(id);
+      if (!confirm(`Удалить сотрудника ${e?.name || ''} и все его отпуска?\nЭто действие нельзя отменить.`)) return;
+      state.vacations.filter(item => item.employeeId === id).forEach(v => removeAllowedConflictsFor(v.id));
+      state.employees = state.employees.filter(item => item.id !== id);
+      state.vacations = state.vacations.filter(item => item.employeeId !== id);
+      Object.keys(state.managers || {}).forEach(dept => { if (state.managers[dept] === id) state.managers[dept] = null; });
+      cleanupAllowedConflicts();
+      if (state.profile?.employeeId === id) { state.profile = null; state.viewDepts = []; }
+      saveState(); render(); maybeShowOnboarding(); closeModal(els.employeeModal); toast('Сотрудник удалён');
+    }
+    let lastFocusedElement = null;
+    function focusFirstControl(container){
+      requestAnimationFrame(() => {
+        const target = container.querySelector('input:not([type="hidden"]), select, textarea, button');
+        if (target) target.focus();
       });
-      await loadAdminAccessData();
-      renderAccessAdminModal();
-    } catch (error) {
-      console.error('Ошибка отклонения запроса доступа:', error);
-      alert('Не удалось отклонить запрос');
     }
-  }
-
-  async function saveInvite() {
-    if (!isAdmin()) return;
-    const email = normalizeEmail(els.accessInviteEmail.value);
-    const departmentIds = getManagedDepartmentCheckboxValues();
-    els.accessInviteError.textContent = '';
-
-    if (!email) {
-      els.accessInviteError.textContent = 'Введите email';
-      return;
+    function setMenuOpen(open){
+      $('moreMenu').classList.toggle('open', open);
+      $('moreBtn').setAttribute('aria-expanded', String(open));
     }
-    if (departmentIds.length === 0) {
-      els.accessInviteError.textContent = 'Выберите хотя бы один отдел';
-      return;
+    function setDepartmentPopoverOpen(open){
+      els.departmentPopover.classList.toggle('open', open);
+      els.departmentPickerBtn.setAttribute('aria-expanded', String(open));
+    }
+    function openModal(modal){
+      lastFocusedElement = document.activeElement;
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+      focusFirstControl(modal);
+    }
+    function closeModal(modal){
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+      if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') lastFocusedElement.focus();
     }
 
-    const key = emailKey(email);
-    const departmentMap = Object.fromEntries(departmentIds.map(id => [id, true]));
-    const invite = {
-      key,
-      email,
-      role: 'manager',
-      departmentIds: departmentMap,
-      isActive: true,
-      createdAt: nowTs(),
-      createdBy: currentUser?.uid || 'unknown'
-    };
-
-    try {
-      await set(ref(db, `roleInvites/${key}`), invite);
-      els.accessInviteEmail.value = '';
-      Array.from(els.accessInviteDepartments.querySelectorAll('input[type="checkbox"]')).forEach(input => {
-        input.checked = false;
+    function setZoom(value){
+      const centerDate = dateFromX(els.scroll.scrollLeft + (els.scroll.clientWidth - Number(getComputedStyle(document.documentElement).getPropertyValue('--left-col').replace('px','') || 294)) / 2);
+      state.zoom = Math.max(180, Math.min(420, Number(value)));
+      scheduleSave();
+      syncControls();
+      renderTimeline();
+      requestAnimationFrame(() => {
+        const leftCol = Number(getComputedStyle(document.documentElement).getPropertyValue('--left-col').replace('px','')) || 294;
+        els.scroll.scrollLeft = Math.max(0, xForDate(centerDate) - Math.max(0, (els.scroll.clientWidth - leftCol) / 2));
       });
-      await loadAdminAccessData();
-      renderAccessAdminModal();
-    } catch (error) {
-      console.error('Ошибка сохранения приглашения:', error);
-      els.accessInviteError.textContent = 'Не удалось сохранить приглашение';
-    }
-  }
-
-  async function deleteInvite(key) {
-    if (!isAdmin()) return;
-    if (!confirm('Удалить приглашение?')) return;
-    try {
-      await remove(ref(db, `roleInvites/${key}`));
-      await loadAdminAccessData();
-      renderAccessAdminModal();
-    } catch (error) {
-      console.error('Ошибка удаления приглашения:', error);
-      alert('Не удалось удалить приглашение');
-    }
-  }
-
-  async function revokeManagerRole(uid) {
-    if (!isAdmin()) return;
-    const role = adminAccessSnapshot.roles?.[uid];
-    if (!role || role.role !== 'manager') return;
-    if (!confirm(`Снять права руководителя у ${role.email || uid}?`)) return;
-
-    try {
-      await remove(ref(db, `roles/${uid}`));
-      await loadAdminAccessData();
-      renderAccessAdminModal();
-    } catch (error) {
-      console.error('Ошибка снятия роли:', error);
-      alert('Не удалось снять доступ');
-    }
-  }
-
-  async function signIn() {
-    const email = normalizeEmail(els.authEmail.value);
-    const password = els.authPassword.value;
-    if (!email || !password) {
-      els.authError.textContent = 'Введите email и пароль';
-      return;
     }
 
-    try {
-      els.authError.textContent = '';
-      pendingRegistrationFullName = '';
-      await signInWithEmailAndPassword(auth, email, password);
-      closeAuthModal();
-    } catch (error) {
-      console.error('Ошибка входа:', error);
-      els.authError.textContent = 'Не удалось войти. Проверьте email и пароль.';
+    function exportCsv(){
+      const rows = [['Сотрудник','Отдел','Начало','Окончание','Статус','Тип',`Календарных дней в ${state.year}`,`Рабочих дней в ${state.year}`,'Комментарий']];
+      state.vacations
+        .filter(v => clampVacation(v))
+        .sort((a,b)=>parseDate(a.start)-parseDate(b.start))
+        .forEach(v => {
+          const e = getEmployee(v.employeeId);
+          rows.push([e?.name || '', e?.role === 'manager' ? 'Руководитель' : e?.dept || '', v.start, v.end, statusText[visualStatus(v)], typeText[vacationType(v)], vacationDaysInYear(v), workingDaysInVacationYear(v), v.note || '']);
+        });
+      const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(';')).join('\n');
+      downloadBlob(new Blob(['\ufeff' + csv], { type:'text/csv;charset=utf-8' }), `vacation-plan-${state.year}.csv`); toast('CSV экспортирован');
     }
-  }
-
-  async function registerAccount() {
-    const fullName = normalizeFullName(els.authFullName.value);
-    const email = normalizeEmail(els.authEmail.value);
-    const password = els.authPassword.value;
-
-    if (!isLikelyFullName(fullName)) {
-      els.authError.textContent = 'Укажите полное имя';
-      return;
-    }
-    if (!email || !password) {
-      els.authError.textContent = 'Введите email и пароль';
-      return;
-    }
-    if (password.length < 6) {
-      els.authError.textContent = 'Пароль должен быть не короче 6 символов';
-      return;
-    }
-
-    try {
-      els.authError.textContent = '';
-      pendingRegistrationFullName = fullName;
-      await createUserWithEmailAndPassword(auth, email, password);
-      closeAuthModal();
-    } catch (error) {
-      console.error('Ошибка регистрации:', error);
-      pendingRegistrationFullName = '';
-      els.authError.textContent = 'Не удалось создать аккаунт. Возможно, email уже используется.';
-    }
-  }
-
-  async function logoutUser() {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error('Ошибка выхода:', error);
-      alert('Не удалось выйти');
-    }
-  }
-
-  function subscribeToAuth() {
-    onAuthStateChanged(auth, async (user) => {
-      currentUser = user || null;
-
-      let roleRecord = null;
-      if (user) {
+    function exportJson(){ downloadBlob(new Blob([JSON.stringify(state,null,2)], { type:'application/json' }), `vacation-backup-${state.year}.json`); }
+    function importJson(file){
+      const reader = new FileReader();
+      reader.onload = async () => {
         try {
-          roleRecord = await resolveCurrentRole(user);
-        } catch (error) {
-          console.error('Ошибка определения роли:', error);
+          const data = JSON.parse(reader.result);
+          if (!isObject(data) || !Array.isArray(data.employees) || !Array.isArray(data.vacations)) throw new Error();
+          state = normalizeLoaded(data);
+          cleanupAllowedConflicts();
+          await saveState({ force: true });
+          render();
+          if (state.profile) closeOnboarding(); else maybeShowOnboarding();
+          toast('Данные импортированы');
         }
-      }
-
-      applyRoleRecord(roleRecord);
-      if (currentUser && pendingRegistrationFullName && roleRecord && !roleRecord.fullName) {
-        try {
-          await update(ref(db, `roles/${currentUser.uid}`), { fullName: pendingRegistrationFullName });
-          roleRecord.fullName = pendingRegistrationFullName;
-          applyRoleRecord(roleRecord);
-        } catch (error) {
-          console.error('Не удалось сохранить полное имя:', error);
-        }
-      }
-      pendingRegistrationFullName = '';
-      updateAuthUI();
-
-      try {
-        if (isAdmin()) {
-          await ensureScheduleInitialized();
-        }
-      } catch (error) {
-        console.error('Ошибка инициализации после входа:', error);
-      }
-
-      renderFilters();
-      renderBoard();
-    });
-  }
-
-  function attachStaticHandlers() {
-    els.branchFilter.onchange = () => {
-      renderFilters();
-      renderBoard();
-    };
-    els.groupFilter.onchange = renderBoard;
-    els.searchInput.oninput = renderBoard;
-    els.expandAllMonthsBtn.onclick = expandAllMonths;
-
-    els.addBtn.onclick = () => openVacationModal();
-    els.resetBtn.onclick = resetAllVacations;
-    els.addEmployeeToolbarBtn.onclick = openEmployeeModal;
-    els.removeEmployeeToolbarBtn.onclick = openRemoveEmployeeModal;
-    els.manageDepartmentsBtn.onclick = openDepartmentAdminModal;
-    els.manageAccessBtn.onclick = openAccessAdminModal;
-
-    els.closeModalBtn.onclick = closeVacationModal;
-    els.saveBtn.onclick = saveVacation;
-    els.employeeSelect.onchange = () => syncVacationColorToSelectedEmployee(false);
-    els.deleteBtn.onclick = deleteVacation;
-
-    els.closeEmployeeModalBtn.onclick = closeEmployeeModal;
-    els.saveEmployeeBtn.onclick = addEmployee;
-    els.employeeDepartmentSearch.oninput = renderEmployeeDepartmentOptions;
-    els.suggestDepartmentBtn.onclick = openDepartmentRequestModal;
-
-    els.closeRemoveEmployeeModalBtn.onclick = closeRemoveEmployeeModal;
-    els.confirmRemoveEmployeeBtn.onclick = removeEmployee;
-    els.removeEmployeeGroupSelect.onchange = refreshRemoveEmployeeSelect;
-
-    els.requestAccessBtn.onclick = openAccessRequestModal;
-    els.loginBtn.onclick = openAuthModal;
-    els.logoutBtn.onclick = logoutUser;
-    els.closeAuthModalBtn.onclick = closeAuthModal;
-    els.submitLoginBtn.onclick = signIn;
-    els.submitRegisterBtn.onclick = registerAccount;
-
-    els.closeDepartmentRequestModalBtn.onclick = closeDepartmentRequestModal;
-    els.saveDepartmentRequestBtn.onclick = saveDepartmentRequest;
-
-    els.closeDepartmentAdminModalBtn.onclick = closeDepartmentAdminModal;
-    els.addDepartmentDirectBtn.onclick = createDepartmentDirect;
-    els.adminDepartmentBranchSelect.onchange = renderDepartmentAdminModal;
-
-    els.closeAccessAdminModalBtn.onclick = closeAccessAdminModal;
-    els.accessInviteSaveBtn.onclick = saveInvite;
-
-    els.closeAccessRequestModalBtn.onclick = closeAccessRequestModal;
-    els.saveAccessRequestBtn.onclick = saveAccessRequest;
-
-    els.modalBackdrop.addEventListener('click', e => { if (e.target === els.modalBackdrop) closeVacationModal(); });
-    els.employeeModalBackdrop.addEventListener('click', e => { if (e.target === els.employeeModalBackdrop) closeEmployeeModal(); });
-    els.removeEmployeeModalBackdrop.addEventListener('click', e => { if (e.target === els.removeEmployeeModalBackdrop) closeRemoveEmployeeModal(); });
-    els.authModalBackdrop.addEventListener('click', e => { if (e.target === els.authModalBackdrop) closeAuthModal(); });
-    els.departmentRequestModalBackdrop.addEventListener('click', e => { if (e.target === els.departmentRequestModalBackdrop) closeDepartmentRequestModal(); });
-    els.departmentAdminModalBackdrop.addEventListener('click', e => { if (e.target === els.departmentAdminModalBackdrop) closeDepartmentAdminModal(); });
-    els.accessAdminModalBackdrop.addEventListener('click', e => { if (e.target === els.accessAdminModalBackdrop) closeAccessAdminModal(); });
-    els.accessRequestModalBackdrop.addEventListener('click', e => { if (e.target === els.accessRequestModalBackdrop) closeAccessRequestModal(); });
-
-    [els.authEmail, els.authPassword].forEach(input => {
-      input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') signIn();
+        catch { toast('Не удалось импортировать JSON'); }
+      };
+      reader.readAsText(file);
+    }
+    function downloadBlob(blob, name){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 0); }
+    function restoreWithCode(){
+      const entered = prompt(`Введите код сброса, чтобы полностью откатить сайт к начальному состоянию.\nКод: ${RESET_CODE}`);
+      if (entered === null) return;
+      if (entered.trim() !== RESET_CODE) return toast('Неверный код сброса');
+      state = startWithEmptyTimeline(clone(defaultState));
+      saveState({ force: true }).then(saved => {
+        render();
+        maybeShowOnboarding();
+        toast(saved ? 'Сайт сброшен к начальному состоянию' : 'Сброс выполнен только на экране');
       });
-    });
+    }
+    function renderOnboardDepartmentOptions(){
+      const depts = allDepartments();
+      $('onboardDept').innerHTML = depts.map(d => `<option value="${escapeHTML(d)}">${escapeHTML(d)}</option>`).join('') + `<option value="__new">Создать новый отдел…</option>`;
+      $('managerDeptChecks').innerHTML = depts.map(d => `<label class="dept-check"><input type="checkbox" value="${escapeHTML(d)}"><span>${escapeHTML(d)}</span></label>`).join('');
+      $('managerDeptChecks').querySelectorAll('label').forEach(label => {
+        const input = label.querySelector('input');
+        input.addEventListener('change', () => { label.classList.toggle('active', input.checked); renderIdentityPicker(); });
+      });
+      renderIdentityPicker();
+    }
+    function updateOnboardRole(){
+      const role = document.querySelector('input[name="onboardRole"]:checked')?.value || 'employee';
+      document.querySelectorAll('.role-card').forEach(card => card.classList.toggle('active', card.querySelector('input').checked));
+      $('managerDepts').classList.toggle('show', role === 'manager'); $('employeeDeptField').classList.toggle('hidden', role === 'manager');
+      renderIdentityPicker();
+    }
+    function updateNewDept(){
+      const isNew = $('onboardDept').value === '__new'; $('deptCreateHint').classList.toggle('hidden', !isNew); if (!isNew) return;
+      const value = $('newDeptName').value.trim(); const similar = similarDepartments(value); $('similarDeptWrap').innerHTML = similar.map(d => `<button class="similar-pill" type="button" data-similar="${escapeHTML(d)}">Использовать: ${escapeHTML(d)}</button>`).join(''); $('similarDeptWrap').classList.toggle('show', !!similar.length);
+      renderIdentityPicker();
+    }
+    function finishOnboarding(event){
+      event.preventDefault();
+      const typedName = $('onboardName').value.trim();
+      const role = onboardingRole();
+      if (!typedName) return;
 
-    window.addEventListener('keydown', e => {
-      if (e.key !== 'Escape') return;
-      closeVacationModal();
-      closeEmployeeModal();
-      closeRemoveEmployeeModal();
-      closeAuthModal();
-      closeDepartmentRequestModal();
-      closeDepartmentAdminModal();
-      closeAccessAdminModal();
-      closeAccessRequestModal();
-    });
-  }
+      let dept = '';
+      let selected = [];
+      let employee = selectedOnboardingEmployee();
+      const pickerVisible = !$('existingEmployeeField').classList.contains('hidden');
+      const pickerValue = $('existingEmployeeSelect').value;
+      if (pickerVisible && !pickerValue) return toast('Выберите себя в списке или создайте новую карточку');
 
-  async function init() {
-    await loadStateFromCloud();
-    createMonthsHeader();
-    renderFilters();
-    renderBoard();
-    updateAuthUI();
-    attachStaticHandlers();
-    subscribeToCloudUpdates();
-    subscribeToAuth();
-  }
+      if (role === 'manager') {
+        selected = onboardingSelectedDepartments();
+        if (!selected.length) return toast('Выберите хотя бы один отдел');
+        selected = selected.map(ensureDepartment).filter(Boolean);
+        dept = selected[0];
+        if (!employee && pickerValue !== '__new') employee = findEmployeeByName(typedName, selected);
+        if (!employee) {
+          employee = { id: uid('e'), name: typedName, dept, position:'Руководитель отдела', initials: initialsFromName(typedName), role:'manager' };
+          state.employees.push(employee);
+        } else {
+          employee.role = 'manager';
+          employee.dept = employee.dept || dept;
+          employee.position = employee.position || 'Руководитель отдела';
+        }
+        selected.forEach(d => state.managers[d] = employee.id);
+      } else {
+        if ($('onboardDept').value === '__new') {
+          const typedDept = $('newDeptName').value.trim();
+          if (!typedDept) return toast('Введите название нового отдела');
+          if (!$('createDeptConfirm').checked) return toast('Подтвердите создание нового отдела');
+          dept = ensureDepartment(typedDept);
+        } else {
+          dept = ensureDepartment($('onboardDept').value);
+        }
+        selected = [dept];
+        if (!employee && pickerValue !== '__new') employee = findEmployeeByName(typedName, selected);
+        if (!employee) {
+          employee = { id: uid('e'), name: typedName, dept, position:'Сотрудник', initials: initialsFromName(typedName), role:'staff' };
+          state.employees.push(employee);
+        } else {
+          employee.role = employee.role === 'manager' ? 'manager' : 'staff';
+          employee.dept = employee.dept || dept;
+          employee.position = employee.position || 'Сотрудник';
+        }
+      }
 
-  init();
-})();
+      state.profile = { name: employee.name, role, dept, depts:selected, employeeId: employee.id };
+      state.viewDepts = role === 'manager' ? selected : [dept];
+      saveState(); closeOnboarding(); render(); scrollToWorkWindow('auto'); toast('График настроен');
+    }
+    function closeOnboarding(){
+      els.onboarding.classList.remove('open');
+      els.onboarding.setAttribute('aria-hidden', 'true');
+    }
+    function maybeShowOnboarding(){
+      closeOnboarding();
+    }
+
+    function scrollToWorkWindow(behavior = 'auto'){
+      requestAnimationFrame(() => {
+        const today = new Date();
+        let target;
+        if (today.getFullYear() === state.year) {
+          target = new Date(state.year, Math.max(0, today.getMonth() - 1), 1);
+        } else {
+          target = new Date(state.year, 0, 1);
+        }
+        els.scroll.scrollTo({ left: Math.max(0, xForDate(target)), behavior });
+      });
+    }
+
+    function bindStaticEvents(){
+      els.search.addEventListener('input', e => { state.query = e.target.value; scheduleSave(); renderTimeline(); });
+      els.year.addEventListener('change', e => { state.year = Number(e.target.value); saveState(); render(); });
+      els.zoomSlider.addEventListener('input', e => setZoom(e.target.value));
+      $('zoomOutBtn').addEventListener('click', () => setZoom(state.zoom - 10));
+      $('zoomInBtn').addEventListener('click', () => setZoom(state.zoom + 10));
+      document.querySelectorAll('[data-filter]').forEach(chip => chip.addEventListener('click', () => { state.filter = chip.dataset.filter; saveState(); render(); }));
+      $('todayBtn').addEventListener('click', () => scrollToWorkWindow('smooth'));
+      $('prevBtn').addEventListener('click', () => els.scroll.scrollBy({ left:-460, behavior:'smooth' }));
+      $('nextBtn').addEventListener('click', () => els.scroll.scrollBy({ left:460, behavior:'smooth' }));
+      $('addVacationBtn').addEventListener('click', openOwnVacation);
+
+      $('moreBtn').addEventListener('click', e => { e.stopPropagation(); setMenuOpen(!$('moreMenu').classList.contains('open')); setDepartmentPopoverOpen(false); });
+      $('departmentPickerBtn').addEventListener('click', e => { e.stopPropagation(); renderDepartmentControls(); setDepartmentPopoverOpen(!els.departmentPopover.classList.contains('open')); setMenuOpen(false); });
+      $('deptAllBtn').addEventListener('click', () => { els.departmentOptions.querySelectorAll('input').forEach(i => { i.checked = true; i.closest('label').classList.add('active'); }); });
+      $('deptOwnBtn').addEventListener('click', () => {
+        const own = managerDepartments().length ? managerDepartments() : allDepartments();
+        els.departmentOptions.querySelectorAll('input').forEach(i => { const checked = own.some(d => normalized(d) === normalized(i.value)); i.checked = checked; i.closest('label').classList.toggle('active', checked); });
+      });
+      $('deptApplyBtn').addEventListener('click', () => {
+        const checked = [...els.departmentOptions.querySelectorAll('input:checked')].map(i => i.value); state.viewDepts = checked.length ? checked : managerDepartments();
+        saveState(); render(); setDepartmentPopoverOpen(false);
+      });
+
+      $('addDepartmentBtn').addEventListener('click', addDepartment);
+      $('addEmployeeBtn').addEventListener('click', () => { setMenuOpen(false); openEmployeeModal(); });
+      $('deleteDepartmentBtn').addEventListener('click', () => { setMenuOpen(false); deleteDepartment(); });
+      $('exportCsvBtn').addEventListener('click', exportCsv); $('backupBtn').addEventListener('click', exportJson); $('importBtn').addEventListener('click', () => $('importFile').click()); $('importFile').addEventListener('change', e => { const file = e.target.files[0]; if (file) importJson(file); e.target.value = ''; });
+      $('printBtn').addEventListener('click', () => window.print()); $('restoreBtn').addEventListener('click', restoreWithCode);
+
+      $('vacationForm').addEventListener('submit', saveVacation); $('employeeForm').addEventListener('submit', saveEmployee); $('deleteVacationBtn').addEventListener('click', deleteVacation); $('deleteEmployeeBtn').addEventListener('click', deleteEmployee);
+      $('closeVacationModalBtn').addEventListener('click', () => closeModal(els.vacationModal)); $('cancelVacationBtn').addEventListener('click', () => closeModal(els.vacationModal)); $('closeEmployeeModalBtn').addEventListener('click', () => closeModal(els.employeeModal)); $('cancelEmployeeBtn').addEventListener('click', () => closeModal(els.employeeModal)); $('closeSideBtn').addEventListener('click', closeSidePanel);
+      els.vacationModal.addEventListener('click', e => { if (e.target === els.vacationModal) closeModal(els.vacationModal); }); els.employeeModal.addEventListener('click', e => { if (e.target === els.employeeModal) closeModal(els.employeeModal); });
+
+      $('onboardingForm').addEventListener('submit', finishOnboarding); document.querySelectorAll('input[name="onboardRole"]').forEach(i => i.addEventListener('change', updateOnboardRole)); $('onboardDept').addEventListener('change', () => { updateNewDept(); renderIdentityPicker(); }); $('newDeptName').addEventListener('input', updateNewDept); $('onboardName').addEventListener('input', renderIdentityPicker);
+      $('similarDeptWrap').addEventListener('click', e => { const btn = e.target.closest('[data-similar]'); if (!btn) return; $('onboardDept').value = btn.dataset.similar; $('deptCreateHint').classList.add('hidden'); renderIdentityPicker(); });
+      $('managerPickAllBtn').addEventListener('click', () => { document.querySelectorAll('#managerDeptChecks input').forEach(i => { i.checked = true; i.closest('label').classList.add('active'); }); renderIdentityPicker(); });
+      $('managerClearBtn').addEventListener('click', () => { document.querySelectorAll('#managerDeptChecks input').forEach(i => { i.checked = false; i.closest('label').classList.remove('active'); }); renderIdentityPicker(); });
+      $('skipOnboardingBtn').addEventListener('click', () => { state.profile = { name:'Гость', role:'employee', dept:'Все отделы', depts:[] }; state.viewDepts = allDepartments(); saveState(); closeOnboarding(); render(); scrollToWorkWindow('auto'); });
+
+      document.addEventListener('click', e => {
+        if (!$('moreMenu').contains(e.target) && e.target !== $('moreBtn')) setMenuOpen(false);
+        if (!els.departmentPopover.contains(e.target) && !els.departmentPickerBtn.contains(e.target)) setDepartmentPopoverOpen(false);
+      });
+      document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        if (els.vacationModal.classList.contains('open')) closeModal(els.vacationModal);
+        else if (els.employeeModal.classList.contains('open')) closeModal(els.employeeModal);
+        else if (els.sidePanel.classList.contains('open')) closeSidePanel();
+        else if ($('moreMenu').classList.contains('open')) setMenuOpen(false);
+        else if (els.departmentPopover.classList.contains('open')) setDepartmentPopoverOpen(false);
+      });
+    }
+
+    async function initApp(){
+      bindStaticEvents();
+      await loadStateFromFirebase();
+    }
+
+    initApp();
